@@ -18,7 +18,11 @@ else
     PROJECT_PATH="${1:-fixtures/sample-petclinic}"
 fi
 
-BINARY="$ROOT_DIR/target/release/javalens"
+if [ -f "$ROOT_DIR/target/release/javalens.exe" ]; then
+    BINARY="$ROOT_DIR/target/release/javalens.exe"
+else
+    BINARY="$ROOT_DIR/target/release/javalens"
+fi
 FRONTEND_DIST="$ROOT_DIR/frontend/dist/index.html"
 
 if [ ! -f "$BINARY" ] || [ ! -f "$FRONTEND_DIST" ] || [ "$FORCE_BUILD" = true ]; then

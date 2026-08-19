@@ -59,15 +59,19 @@ cd "$ROOT_DIR"
 echo -e "${CYAN}[3/3] Compiling Backend Binary (Cargo Release Mode)...${NC}"
 cargo build --release
 
-if [ ! -f "target/release/javalens" ]; then
+if [ -f "target/release/javalens.exe" ]; then
+    BINARY_PATH="target/release/javalens.exe"
+elif [ -f "target/release/javalens" ]; then
+    BINARY_PATH="target/release/javalens"
+else
     echo -e "${RED}[ERROR] Compiled binary not found at target/release/javalens${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}✓ Backend binary compiled successfully: target/release/javalens${NC}\n"
+echo -e "${GREEN}✓ Backend binary compiled successfully: $BINARY_PATH${NC}\n"
 
 echo -e "${GREEN}========================================================${NC}"
 echo -e "${GREEN}              BUILD COMPLETED SUCCESSFULLY!             ${NC}"
 echo -e "${GREEN}========================================================${NC}"
-echo -e "\nTo start JavaLens, run:"
-echo -e "  ${CYAN}./run.sh${NC} or ${CYAN}./target/release/javalens <path-to-java-project>${NC}\n"
+echo -e "\nTo start JavaLens Desktop Application, run:"
+echo -e "  ${CYAN}./run.sh${NC} or ${CYAN}./$BINARY_PATH <path-to-java-project>${NC}\n"
