@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
     "@xyflow/react": "^12.4.4",
     "clsx": "^2.1.1",
     "lucide-react": "^1.16.0",

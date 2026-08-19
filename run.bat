@@ -26,11 +26,9 @@ if not exist "%FRONTEND_DIST%" (
 
 echo.
 echo ========================================================
-echo               🚀 Launching JavaLens Server
+echo          🚀 Launching JavaLens Desktop App (Tauri)
 echo ========================================================
 echo Target Project : %PROJECT_PATH%
-echo Web Interface  : http://localhost:3030
 echo.
 
-start "" "http://localhost:3030"
 "%BINARY%" "%PROJECT_PATH%"

@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+build = "src/build.rs"
 
 [dependencies]
 graph-core = { path = "../graph-core" }
@@ -17,9 +18,13 @@ anyhow = { workspace = true }
 walkdir = { workspace = true }
 regex = { workspace = true }
 rayon = { workspace = true }
-axum = { version = "0.8", features = ["ws", "json"] }
-tower-http = { version = "0.6", features = ["cors", "fs"] }
+tauri = { workspace = true }
+tauri-plugin-dialog = { workspace = true }
+tauri-plugin-opener = { workspace = true }
 rfd = "0.17"
+
+[build-dependencies]
+tauri-build = { workspace = true }
 
 [[bin]]
 name = "javalens"

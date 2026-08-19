@@ -1,9 +1,8 @@
 # ==============================================================================
-#  JavaLens - 1-Click Launch Script (PowerShell / Windows)
+#  JavaLens - 1-Click Desktop App Launcher (PowerShell / Windows)
 # ==============================================================================
 param (
-    [string]$ProjectPath = "fixtures/sample-petclinic",
-    [int]$Port = 3030
+    [string]$ProjectPath = "fixtures/sample-petclinic"
 )
 
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
@@ -23,18 +22,9 @@ if (-not (Test-Path $Binary) -or -not (Test-Path $FrontendDist)) {
 }
 
 Write-Host "========================================================" -ForegroundColor Magenta
-Write-Host "              🚀 Launching JavaLens Server              " -ForegroundColor Magenta
+Write-Host "         🚀 Launching JavaLens Desktop App              " -ForegroundColor Magenta
 Write-Host "========================================================" -ForegroundColor Magenta
 Write-Host "Target Project : $ProjectPath" -ForegroundColor Cyan
-Write-Host "Web Interface  : http://localhost:$Port" -ForegroundColor Green
-Write-Host "Press Ctrl+C to stop the server.`n" -ForegroundColor DarkGray
+Write-Host "Framework      : Tauri 2.0 Native Desktop Window`n" -ForegroundColor Green
 
-# Open browser after a brief delay
-Start-Job -ScriptBlock {
-    param($url)
-    Start-Sleep -Seconds 2
-    Start-Process $url
-} -ArgumentList "http://localhost:$Port" | Out-Null
-
-$env:PORT = "$Port"
 & $Binary $ProjectPath

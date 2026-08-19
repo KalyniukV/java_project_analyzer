@@ -1,17 +1,19 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod commands;
 mod scanner;
-mod server;
 
 use anyhow::Result;
+use commands::*;
+use graph_core::algorithms::GraphAnalyzer;
+use graph_core::models::ScanProgress;
 use graph_core::storage::StorageManager;
 use scanner::ProjectScanner;
-use server::{create_router, AppState};
-use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     // 1. Initialize embedded NoSQL database (redb)
@@ -19,15 +21,14 @@ async fn main() -> Result<()> {
     let storage = Arc::new(StorageManager::open(&db_path)?);
     println!("💾 Embedded NoSQL Database initialized at: {}", db_path.display());
 
-    let args: Vec<String> = std::env::args().collect();
-
     let state = AppState {
         current_analyzer: Arc::new(RwLock::new(None)),
         storage: storage.clone(),
-        scan_progress: Arc::new(RwLock::new(graph_core::models::ScanProgress::default())),
+        scan_progress: Arc::new(RwLock::new(ScanProgress::default())),
     };
 
-    // If a path is provided in arguments, pre-scan it
+    // If a path is provided in CLI arguments, pre-scan it
+    let args: Vec<String> = std::env::args().collect();
     if args.len() > 1 && !args[1].starts_with('-') {
         let project_path = PathBuf::from(&args[1]);
         if project_path.exists() {
@@ -43,7 +44,7 @@ async fn main() -> Result<()> {
                         model.relationships.len(),
                         model.scan_time_ms
                     );
-                    let mut analyzer = graph_core::algorithms::GraphAnalyzer::new(model);
+                    let mut analyzer = GraphAnalyzer::new(model);
                     analyzer.calculate_metrics();
 
                     // Persist to NoSQL DB
@@ -53,8 +54,12 @@ async fn main() -> Result<()> {
                         println!("💾 Project successfully stored in NoSQL DB!");
                     }
 
-                    let mut lock = state.current_analyzer.write().await;
-                    *lock = Some(analyzer);
+                    let state_clone = state.clone();
+                    let rt = tokio::runtime::Runtime::new().unwrap();
+                    rt.block_on(async {
+                        let mut lock = state_clone.current_analyzer.write().await;
+                        *lock = Some(analyzer);
+                    });
                 }
                 Err(e) => {
                     eprintln!("❌ Scan error: {}", e);
@@ -63,17 +68,34 @@ async fn main() -> Result<()> {
         }
     }
 
-    let port: u16 = std::env::var("PORT")
-        .ok()
-        .and_then(|p| p.parse().ok())
-        .unwrap_or(3030);
+    println!("🚀 Starting JavaLens Desktop Application (Tauri 2.0)...");
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], port));
-    let app = create_router(state);
-
-    println!("🚀 JavaLens Backend Server running at http://{}", addr);
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
+        .manage(state)
+        .invoke_handler(tauri::generate_handler![
+            scan_project,
+            get_scan_progress,
+            get_project,
+            get_graph,
+            get_class_detail,
+            get_cycles,
+            list_stored_projects,
+            load_stored_project,
+            delete_stored_project,
+            pick_folder,
+            browse_dirs,
+            open_file,
+            get_impact_analysis,
+            get_architecture_drift,
+            get_microservice_extraction,
+            get_architecture_health,
+            get_architecture_snapshot,
+            get_call_hierarchy,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running JavaLens Tauri application");
 
     Ok(())
 }
