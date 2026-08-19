@@ -1,6 +1,6 @@
-import React from 'react';
-import { ProjectModel, VisualGraphPayload } from '../../types';
-import { openFile } from '../../api/client';
+import React, { useState, useEffect } from 'react';
+import { ProjectModel, VisualGraphPayload, ClassInfo } from '../../types';
+import { openFile, getClassDetail } from '../../api/client';
 import {
   FileCode,
   Folder,
@@ -49,11 +49,25 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
     );
   }
 
+  const [detailClassInfo, setDetailClassInfo] = useState<ClassInfo | null>(null);
+
   // Find node in graphData
   const activeNode = graphData?.nodes.find((n) => n.id === selectedNodeId);
-  const classInfo = project?.classes.find((c) => c.id === selectedNodeId);
+  const baseClassInfo = project?.classes.find((c) => c.id === selectedNodeId);
   const pkgInfo = project?.packages.find((p) => p.id === selectedNodeId);
   const moduleInfo = project?.modules.find((m) => m.id === selectedNodeId);
+
+  useEffect(() => {
+    if (selectedNodeId && activeNode?.category !== 'package' && activeNode?.category !== 'module') {
+      getClassDetail(selectedNodeId)
+        .then((detail) => setDetailClassInfo(detail))
+        .catch(() => setDetailClassInfo(null));
+    } else {
+      setDetailClassInfo(null);
+    }
+  }, [selectedNodeId, activeNode?.category]);
+
+  const classInfo = detailClassInfo || baseClassInfo;
 
   // Inbound & Outbound edges
   const inboundEdges = graphData?.edges.filter((e) => e.target === selectedNodeId) || [];

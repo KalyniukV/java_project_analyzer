@@ -202,3 +202,12 @@ export async function getCallHierarchy(target: string, depth: number = 2): Promi
   }
   return res.json();
 }
+
+export async function getClassDetail(target: string): Promise<any> {
+  const res = await fetch(`${API_BASE}/class/detail?target=${encodeURIComponent(target)}`);
+  if (!res.ok) {
+    return null;
+  }
+  return res.json();
+}
+

@@ -123,6 +123,7 @@ pub fn create_router(state: AppState) -> Router {
         .route("/intelligence/health", get(get_architecture_health_handler))
         .route("/intelligence/snapshot", get(get_architecture_snapshot_handler))
         .route("/call-hierarchy", get(get_call_hierarchy_handler))
+        .route("/class/detail", get(get_class_detail_handler))
         .layer(cors)
         .with_state(state);
 
@@ -216,7 +217,64 @@ async fn get_project_handler(
 ) -> Result<Json<ProjectModel>, (StatusCode, String)> {
     let lock = state.current_analyzer.read().await;
     if let Some(analyzer) = &*lock {
-        Ok(Json(analyzer.model.clone()))
+        let is_large_project = analyzer.model.classes.len() > 300;
+        if is_large_project {
+            // High-performance streaming: send lightweight class descriptors and omit raw relationships
+            let lightweight_classes: Vec<ClassInfo> = analyzer
+                .model
+                .classes
+                .iter()
+                .map(|c| ClassInfo {
+                    id: c.id.clone(),
+                    name: c.name.clone(),
+                    package_name: c.package_name.clone(),
+                    module_name: c.module_name.clone(),
+                    layer: c.layer,
+                    file_path: c.file_path.clone(),
+                    line_number: c.line_number,
+                    kind: c.kind,
+                    is_public: c.is_public,
+                    loc: c.loc,
+                    super_class: c.super_class.clone(),
+                    interfaces: c.interfaces.clone(),
+                    annotations: c.annotations.clone(),
+                    fields: Vec::new(),
+                    methods: Vec::new(),
+                    referenced_types: Vec::new(),
+                })
+                .collect();
+
+            let summary_model = ProjectModel {
+                project_name: analyzer.model.project_name.clone(),
+                root_path: analyzer.model.root_path.clone(),
+                scan_time_ms: analyzer.model.scan_time_ms,
+                modules: analyzer.model.modules.clone(),
+                packages: analyzer.model.packages.clone(),
+                classes: lightweight_classes,
+                relationships: Vec::new(),
+            };
+
+            Ok(Json(summary_model))
+        } else {
+            Ok(Json(analyzer.model.clone()))
+        }
+    } else {
+        Err((StatusCode::NOT_FOUND, "No project loaded".to_string()))
+    }
+}
+
+async fn get_class_detail_handler(
+    State(state): State<AppState>,
+    Query(query): Query<TargetQuery>,
+) -> Result<Json<ClassInfo>, (StatusCode, String)> {
+    let lock = state.current_analyzer.read().await;
+    if let Some(analyzer) = &*lock {
+        let target = query.target.unwrap_or_default();
+        if let Some(cls) = analyzer.model.classes.iter().find(|c| c.id == target) {
+            Ok(Json(cls.clone()))
+        } else {
+            Err((StatusCode::NOT_FOUND, "Class not found".to_string()))
+        }
     } else {
         Err((StatusCode::NOT_FOUND, "No project loaded".to_string()))
     }
