@@ -1,0 +1,25 @@
+[package]
+name = "desktop-app"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+graph-core = { path = "../graph-core" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+walkdir = { workspace = true }
+regex = { workspace = true }
+axum = { version = "0.8", features = ["ws", "json"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+rfd = "0.17"
+
+[[bin]]
+name = "javalens"
+path = "src/main.rs"

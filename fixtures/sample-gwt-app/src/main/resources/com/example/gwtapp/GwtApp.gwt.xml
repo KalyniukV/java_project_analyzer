@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE module PUBLIC "-//Google Inc.//DTD Google Web Toolkit 2.9.0//EN"
+  "http://gwtproject.org/doctype/2.9.0/gwt-module.dtd">
+<module rename-to='gwtapp'>
+  <!-- Inherit the core Web Toolkit stuff. -->
+  <inherits name='com.google.gwt.user.User'/>
+  <inherits name='com.google.gwt.user.theme.clean.Clean'/>
+
+  <!-- Specify the paths for translatable code -->
+  <source path='client'/>
+  <source path='shared'/>
+
+  <!-- Specify the app entry point class. -->
+  <entry-point class='com.example.gwtapp.client.AppEntryPoint'/>
+
+  <!-- GWT RPC Servlets -->
+  <servlet path="/greet" class="com.example.gwtapp.server.GreetingServiceImpl"/>
+</module>
