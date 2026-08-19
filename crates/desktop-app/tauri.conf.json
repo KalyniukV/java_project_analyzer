@@ -4,8 +4,7 @@
   "version": "0.1.0",
   "identifier": "com.javalens.analyzer",
   "build": {
-    "frontendDist": "../../frontend/dist",
-    "devUrl": "http://localhost:5173"
+    "frontendDist": "../../frontend/dist"
   },
   "app": {
     "withGlobalTauri": true,
