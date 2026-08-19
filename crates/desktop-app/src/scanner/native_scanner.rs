@@ -91,6 +91,7 @@ impl NativeJavaScanner {
         }
     }
 
+    #[allow(dead_code)]
     pub fn scan_project(&self, root_dir: &Path) -> Result<ProjectModel> {
         self.scan_project_with_progress(root_dir, |_| {})
     }

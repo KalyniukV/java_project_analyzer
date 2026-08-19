@@ -39,33 +39,64 @@
 
 ---
 
-## 🚀 Швидкий запуск
+## 🚀 Швидкий запуск (1-Click Build & Run)
 
-### Вимоги:
-- **Rust toolchain** (1.75+) — `cargo`, `rustc`
-- **Node.js** (18+ або 20+) та `npm`
+### 🛠️ Автоматична збірка (Build Script):
 
-### 1. Збірка фронтенду
+Після клонування репозиторію виконайте скрипт збірки для вашої ОС:
+
+- **Windows (PowerShell)**:
+  ```powershell
+  .\build.ps1
+  ```
+- **Windows (CMD / Подвійний клік)**:
+  ```cmd
+  build.bat
+  ```
+- **Linux / macOS**:
+  ```bash
+  chmod +x build.sh && ./build.sh
+  ```
+
+---
+
+### ⚡ 1-Click запуск програми (Run Script):
+
+- **Windows (PowerShell)**:
+  ```powershell
+  .\run.ps1
+  # Або для власного проєкту:
+  .\run.ps1 -ProjectPath "C:\Projects\MyEnterpriseApp"
+  ```
+- **Windows (CMD)**:
+  ```cmd
+  run.bat
+  ```
+- **Linux / macOS**:
+  ```bash
+  chmod +x run.sh && ./run.sh
+  ```
+
+Відкрийте у браузері: 👉 **`http://localhost:3030`** (відкривається автоматично).
+
+---
+
+### 🔨 Ручна збірка (Manual Build):
+
+#### Вимоги:
+- **Rust toolchain** (1.75+) — `cargo`, `rustc` ([rustup.rs](https://rustup.rs))
+- **Node.js** (18+ або 20+) та `npm` ([nodejs.org](https://nodejs.org))
+
 ```bash
+# 1. Збірка фронтенду
 cd frontend
 npm install
 npm run build
 cd ..
+
+# 2. Збірка та запуск бекенду
+cargo run --release -p desktop-app -- "fixtures/sample-petclinic"
 ```
-
-### 2. Запуск сервера
-```bash
-# Запуск із демо-проєктом PetClinic:
-cargo run -p desktop-app -- "fixtures/sample-petclinic"
-
-# АБО з GWT RPC проєктом:
-cargo run -p desktop-app -- "fixtures/sample-gwt-app"
-
-# АБО чистий запуск (вибір проєкту через вбудований провідник):
-cargo run -p desktop-app
-```
-
-Відкрийте у браузері: 👉 **`http://localhost:3030`**
 
 ---
 
