@@ -170,6 +170,7 @@ export interface VisualGraphNode {
   file_path?: string;
   line_number?: number;
   is_external?: boolean;
+  hop_depth?: number;
 }
 
 export interface VisualGraphEdge {
@@ -180,6 +181,7 @@ export interface VisualGraphEdge {
   kind: RelationKind;
   highlight_state: EdgeHighlightState;
   is_circular: boolean;
+  hop_depth?: number;
 }
 
 export interface VisualGraphPayload {

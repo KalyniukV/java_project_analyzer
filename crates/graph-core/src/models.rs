@@ -205,6 +205,7 @@ pub struct VisualGraphNode {
     pub file_path: Option<String>,
     pub line_number: Option<u32>,
     pub is_external: Option<bool>,
+    pub hop_depth: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,6 +217,7 @@ pub struct VisualGraphEdge {
     pub kind: RelationKind,
     pub highlight_state: EdgeHighlightState,
     pub is_circular: bool,
+    pub hop_depth: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

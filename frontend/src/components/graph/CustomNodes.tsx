@@ -122,9 +122,23 @@ export const CustomGraphNode = memo(({ data, selected }: NodeProps<any>) => {
             {node.label}
           </span>
         </div>
-        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${badgeColor}`}>
-          {categoryBadge}
-        </span>
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {node.hop_depth !== undefined && node.hop_depth > 0 && (
+            <span
+              className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full border ${
+                node.hop_depth === 1
+                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+                  : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+              }`}
+              title={node.hop_depth === 1 ? 'Пряма залежність (Hop 1)' : `Транзитивна залежність (Глибина Hop ${node.hop_depth})`}
+            >
+              {node.hop_depth === 1 ? 'Hop 1' : `Hop ${node.hop_depth}`}
+            </span>
+          )}
+          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${badgeColor}`}>
+            {categoryBadge}
+          </span>
+        </div>
       </div>
 
       {node.sub_label && (

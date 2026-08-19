@@ -255,6 +255,7 @@ impl GraphAnalyzer {
                             file_path: Some(m.path.clone()),
                             line_number: None,
                             is_external: Some(is_ext),
+                            hop_depth: None,
                         });
                     }
                 }
@@ -274,6 +275,7 @@ impl GraphAnalyzer {
                                     kind: rel.kind.clone(),
                                     highlight_state: EdgeHighlightState::Normal,
                                     is_circular: rel.is_circular,
+                                    hop_depth: None,
                                 });
                             }
                         }
@@ -337,6 +339,7 @@ impl GraphAnalyzer {
                             file_path: None,
                             line_number: None,
                             is_external: Some(is_ext),
+                            hop_depth: None,
                         });
                     }
                 }
@@ -355,6 +358,7 @@ impl GraphAnalyzer {
                                     kind: rel.kind.clone(),
                                     highlight_state: EdgeHighlightState::Normal,
                                     is_circular: rel.is_circular,
+                                    hop_depth: None,
                                 });
                             }
                         }
@@ -428,6 +432,7 @@ impl GraphAnalyzer {
                             file_path: Some(c.file_path.clone()),
                             line_number: Some(c.line_number),
                             is_external: Some(is_ext),
+                            hop_depth: None,
                         });
                     }
                 }
@@ -448,6 +453,7 @@ impl GraphAnalyzer {
                                     kind: rel.kind.clone(),
                                     highlight_state: EdgeHighlightState::Normal,
                                     is_circular: rel.is_circular,
+                                    hop_depth: None,
                                 });
                             }
                         }
@@ -489,6 +495,9 @@ impl GraphAnalyzer {
                     .push(e.source.as_str());
             }
 
+            let mut node_distances: HashMap<String, u32> = HashMap::new();
+            node_distances.insert(target_id.to_string(), 0);
+
             // Outbound BFS
             let mut outbound_nodes: HashSet<String> = HashSet::new();
             let mut q: VecDeque<(&str, u32)> = VecDeque::new();
@@ -498,6 +507,7 @@ impl GraphAnalyzer {
                     if let Some(neighbors) = forward_adj.get(curr) {
                         for &next in neighbors {
                             if next != target_id && outbound_nodes.insert(next.to_string()) {
+                                node_distances.entry(next.to_string()).or_insert(d + 1);
                                 q.push_back((next, d + 1));
                             }
                         }
@@ -514,6 +524,7 @@ impl GraphAnalyzer {
                     if let Some(neighbors) = backward_adj.get(curr) {
                         for &prev in neighbors {
                             if prev != target_id && inbound_nodes.insert(prev.to_string()) {
+                                node_distances.entry(prev.to_string()).or_insert(d + 1);
                                 q_in.push_back((prev, d + 1));
                             }
                         }
@@ -521,8 +532,9 @@ impl GraphAnalyzer {
                 }
             }
 
-            // Classify nodes
+            // Classify nodes & set hop_depth
             for node in &mut visual_nodes {
+                node.hop_depth = node_distances.get(&node.id).copied();
                 if node.id == target_id {
                     node.highlight_state = NodeHighlightState::Selected;
                 } else if inbound_nodes.contains(&node.id) && outbound_nodes.contains(&node.id) {
@@ -536,8 +548,20 @@ impl GraphAnalyzer {
                 }
             }
 
-            // Classify edges
+            // Classify edges & set hop_depth
             for edge in &mut visual_edges {
+                if edge.source == target_id || edge.target == target_id {
+                    edge.hop_depth = Some(1);
+                } else {
+                    let d1 = node_distances.get(&edge.source).copied();
+                    let d2 = node_distances.get(&edge.target).copied();
+                    if let (Some(s), Some(t)) = (d1, d2) {
+                        edge.hop_depth = Some(s.max(t));
+                    } else {
+                        edge.hop_depth = None;
+                    }
+                }
+
                 if edge.source == target_id && edge.target == target_id {
                     edge.highlight_state = EdgeHighlightState::InboundActive;
                 } else if edge.source == target_id {

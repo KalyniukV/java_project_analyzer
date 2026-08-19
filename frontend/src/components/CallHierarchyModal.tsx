@@ -149,8 +149,12 @@ const CallHierarchyFlowEdge = memo(({
   const isGwtRpc = data?.call_kind?.includes('Gwt') || data?.call_kind?.includes('Rpc');
   const isField = data?.call_kind === 'FieldAccess';
   const label = data?.label as string | undefined;
+  const hopDepth = data?.hop_depth as number | undefined;
+  const isIndirect = hopDepth !== undefined && hopDepth >= 2;
 
-  const strokeColor = isGwtRpc ? '#d946ef' : isField ? '#c084fc' : '#38bdf8';
+  let strokeColor = isGwtRpc ? '#d946ef' : isField ? '#c084fc' : isIndirect ? '#818cf8' : '#38bdf8';
+  let strokeWidth = isIndirect ? 1.8 : 2.5;
+  let strokeDasharray = isIndirect ? '6,4' : isField ? '4,4' : undefined;
 
   return (
     <>
@@ -159,22 +163,29 @@ const CallHierarchyFlowEdge = memo(({
         path={edgePath}
         style={{
           stroke: strokeColor,
-          strokeWidth: 2,
-          strokeDasharray: isField ? '4,4' : undefined,
-          filter: `drop-shadow(0 0 3px ${strokeColor}66)`,
+          strokeWidth,
+          strokeDasharray,
+          filter: `drop-shadow(0 0 ${isIndirect ? '2px' : '4px'} ${strokeColor}66)`,
         }}
       />
-      {label && (
+      {(label || isIndirect) && (
         <foreignObject
-          width={110}
+          width={120}
           height={22}
-          x={labelX - 55}
+          x={labelX - 60}
           y={labelY - 11}
           className="pointer-events-none"
         >
           <div className="flex items-center justify-center h-full">
-            <span className="text-[8px] font-mono font-bold px-1.5 py-0.2 rounded-full bg-[#161b22]/95 border border-[#30363d] text-slate-300 shadow">
-              {label}
+            <span
+              className={`text-[8px] font-mono font-bold px-1.5 py-0.2 rounded-full border shadow flex items-center gap-1 ${
+                isIndirect
+                  ? 'bg-indigo-950/90 border-indigo-500/50 text-indigo-300'
+                  : 'bg-[#161b22]/95 border-[#30363d] text-slate-300'
+              }`}
+            >
+              {isIndirect && <span className="text-[7px] text-indigo-400">Hop {hopDepth}</span>}
+              <span>{label || 'calls'}</span>
             </span>
           </div>
         </foreignObject>
@@ -288,22 +299,31 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
       };
     });
 
+    const nodeMap = new Map(filteredNodes.map((n) => [n.id, n]));
+
     const rfEdges = hierarchy.edges
       .filter((e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target))
-      .map((edge) => ({
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: 'callEdge',
-        data: { ...edge },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: 12,
-          height: 12,
-          color: edge.call_kind?.includes('Gwt') ? '#d946ef' : '#38bdf8',
-        },
-        animated: true,
-      }));
+      .map((edge) => {
+        const srcNode = nodeMap.get(edge.source);
+        const tgtNode = nodeMap.get(edge.target);
+        const edgeDepth = Math.max(Math.abs(srcNode?.depth || 0), Math.abs(tgtNode?.depth || 0));
+        const isIndirect = edgeDepth >= 2;
+
+        return {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          type: 'callEdge',
+          data: { ...edge, hop_depth: edgeDepth },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 12,
+            height: 12,
+            color: edge.call_kind?.includes('Gwt') ? '#d946ef' : isIndirect ? '#818cf8' : '#38bdf8',
+          },
+          animated: true,
+        };
+      });
 
     return { rfNodes, rfEdges };
   }, [hierarchy, direction]);
