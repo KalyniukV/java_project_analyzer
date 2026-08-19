@@ -2,7 +2,7 @@
 setlocal enabledelayedexpansion
 
 echo ========================================================
-echo           JavaLens - Build System Installer
+echo      JavaLens - Tauri 2.0 Desktop App Build System
 echo ========================================================
 echo.
 
@@ -57,9 +57,14 @@ if %errorlevel% neq 0 (
 
 cd /d "%ROOT_DIR%"
 
-:: 4. Build Rust Backend
+:: 4. Remove old binary to prevent stale Axum binaries
 echo.
-echo [3/3] Compiling Backend Binary (Release)...
+echo [3/3] Compiling Tauri Desktop Binary (Release)...
+if exist "target\release\javalens.exe" (
+    echo Removing old binary to ensure clean Tauri build...
+    del /f /q "target\release\javalens.exe"
+)
+
 cargo build --release
 if %errorlevel% neq 0 (
     echo [ERROR] Cargo compilation failed!
@@ -69,10 +74,10 @@ if %errorlevel% neq 0 (
 
 echo.
 echo ========================================================
-echo           BUILD COMPLETED SUCCESSFULLY!
+echo     BUILD COMPLETED SUCCESSFULLY (Tauri 2.0 Desktop)
 echo ========================================================
 echo.
-echo Executable binary: target\release\javalens.exe
+echo Desktop binary: target\release\javalens.exe
 echo To launch, run: run.bat
 echo.
 pause

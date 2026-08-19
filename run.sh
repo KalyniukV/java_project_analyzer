@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 #  JavaLens - 1-Click Desktop App Launcher (Linux / macOS / Bash)
+#  Launches the Tauri 2.0 native desktop window (NO browser)
 # ==============================================================================
 set -e
 
@@ -18,25 +19,39 @@ else
     PROJECT_PATH="${1:-fixtures/sample-petclinic}"
 fi
 
+# Detect binary (Windows .exe vs Linux/macOS)
 if [ -f "$ROOT_DIR/target/release/javalens.exe" ]; then
     BINARY="$ROOT_DIR/target/release/javalens.exe"
-else
+elif [ -f "$ROOT_DIR/target/release/javalens" ]; then
     BINARY="$ROOT_DIR/target/release/javalens"
+else
+    BINARY=""
 fi
+
 FRONTEND_DIST="$ROOT_DIR/frontend/dist/index.html"
 
-if [ ! -f "$BINARY" ] || [ ! -f "$FRONTEND_DIST" ] || [ "$FORCE_BUILD" = true ]; then
-    echo "⚙️ Building JavaLens Desktop Application (Tauri)..."
+# Auto-build if binary missing, frontend missing, or --build flag
+if [ -z "$BINARY" ] || [ ! -f "$FRONTEND_DIST" ] || [ "$FORCE_BUILD" = true ]; then
+    echo "⚙️ Building JavaLens Desktop Application (Tauri 2.0)..."
     chmod +x "$ROOT_DIR/build.sh"
     "$ROOT_DIR/build.sh"
+
+    # Re-detect binary after build
+    if [ -f "$ROOT_DIR/target/release/javalens.exe" ]; then
+        BINARY="$ROOT_DIR/target/release/javalens.exe"
+    elif [ -f "$ROOT_DIR/target/release/javalens" ]; then
+        BINARY="$ROOT_DIR/target/release/javalens"
+    else
+        echo "❌ Build failed: no binary produced. Check build.sh output above."
+        exit 1
+    fi
 fi
 
 echo "========================================================"
-echo "         🚀 Launching JavaLens Desktop App (Tauri)      "
+echo "    🚀 Launching JavaLens Desktop App (Tauri 2.0)       "
 echo "========================================================"
 echo "Target Project : $PROJECT_PATH"
 echo "Binary         : $BINARY"
-echo "Framework      : Tauri 2.0 Native Desktop Window"
 echo ""
 
 "$BINARY" "$PROJECT_PATH"

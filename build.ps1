@@ -1,8 +1,7 @@
 # ==============================================================================
-#  JavaLens - Automated Build Script (PowerShell / Windows)
+#  JavaLens - Tauri 2.0 Desktop App Build Script (PowerShell / Windows)
 # ==============================================================================
-# This script automates building both the frontend (React + Vite) and the
-# high-performance backend (Rust + Rayon + Redb).
+# Builds the Tauri 2.0 native desktop application (NO browser/web server).
 # ==============================================================================
 
 $ErrorActionPreference = "Stop"
@@ -29,7 +28,7 @@ $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $RootDir
 
 Write-Host "========================================================" -ForegroundColor Magenta
-Write-Host "           JavaLens - Build System Installer            " -ForegroundColor Magenta
+Write-Host "     JavaLens - Tauri 2.0 Desktop App Build System      " -ForegroundColor Magenta
 Write-Host "========================================================" -ForegroundColor Magenta
 Write-Host "Project Directory: $RootDir`n"
 
@@ -117,9 +116,16 @@ if (Test-Path (Join-Path $DistDir "index.html")) {
 Set-Location $RootDir
 
 # ------------------------------------------------------------------------------
-# 3. Build Backend (Rust / Desktop-App Release Binary)
+# 3. Build Tauri Desktop Backend (Rust Release Binary)
 # ------------------------------------------------------------------------------
-Write-Step "3/3: Compiling Backend Binary (Cargo Release Mode)"
+Write-Step "3/3: Compiling Tauri Desktop Binary (Cargo Release Mode)"
+
+# IMPORTANT: Remove old binary FIRST so stale Axum-based binaries are never used
+$OldBinary = Join-Path $RootDir "target\release\javalens.exe"
+if (Test-Path $OldBinary) {
+    Write-Warn "Removing old binary to ensure clean Tauri build..."
+    Remove-Item $OldBinary -Force
+}
 
 Write-Host " Building Rust crates in release mode (cargo build --release)..." -ForegroundColor DarkGray
 & cargo build --release
@@ -133,7 +139,7 @@ $BinaryName = if ($IsWindows -or $env:OS -like "*Windows*") { "javalens.exe" } e
 $BinaryPath = Join-Path $RootDir "target\release\$BinaryName"
 
 if (Test-Path $BinaryPath) {
-    Write-Success "Backend binary compiled successfully: target\release\$BinaryName"
+    Write-Success "Tauri desktop binary compiled: target\release\$BinaryName"
 } else {
     Write-Err "Compiled binary not found at: $BinaryPath"
     exit 1
@@ -143,9 +149,9 @@ if (Test-Path $BinaryPath) {
 # Completion Summary
 # ------------------------------------------------------------------------------
 Write-Host "`n========================================================" -ForegroundColor Green
-Write-Host "              BUILD COMPLETED SUCCESSFULLY!             " -ForegroundColor Green
+Write-Host "     BUILD COMPLETED SUCCESSFULLY (Tauri 2.0 Desktop)   " -ForegroundColor Green
 Write-Host "========================================================" -ForegroundColor Green
-Write-Host "`nTo start JavaLens, run one of the following commands:"
-Write-Host "  1. Launch interactive runner:     .\run.ps1" -ForegroundColor Cyan
-Write-Host "  2. Analyze a specific project:   .\target\release\$BinaryName <path-to-java-project>" -ForegroundColor Cyan
-Write-Host "  3. Sample PetClinic demo:        .\target\release\$BinaryName fixtures\sample-petclinic`n" -ForegroundColor Cyan
+Write-Host "`nTo launch JavaLens Desktop Application:"
+Write-Host "  1. Interactive launcher:   .\run.ps1" -ForegroundColor Cyan
+Write-Host "  2. Specific project:       .\run.ps1 -ProjectPath 'C:\Projects\MyApp'" -ForegroundColor Cyan
+Write-Host "  3. Sample demo:            .\target\release\$BinaryName fixtures\sample-petclinic`n" -ForegroundColor Cyan
