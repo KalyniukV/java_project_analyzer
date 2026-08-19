@@ -24,9 +24,5 @@
     "security": {
       "csp": null
     }
-  },
-  "plugins": {
-    "opener": {},
-    "dialog": {}
   }
 }
