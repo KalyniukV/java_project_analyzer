@@ -10,6 +10,7 @@ import {
   ArchitectureHealth,
   ArchitectureSnapshot,
   CallHierarchyGraph,
+  ScanProgress,
 } from '../types';
 
 const API_BASE = 'http://127.0.0.1:3030/api';
@@ -23,6 +24,14 @@ export async function scanProject(path: string): Promise<ScanResponse> {
   if (!res.ok) {
     const err = await res.text();
     throw new Error(err || 'Failed to scan project');
+  }
+  return res.json();
+}
+
+export async function getScanProgress(): Promise<ScanProgress> {
+  const res = await fetch(`${API_BASE}/scan/progress`);
+  if (!res.ok) {
+    throw new Error('Failed to fetch scan progress');
   }
   return res.json();
 }

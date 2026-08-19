@@ -3,7 +3,11 @@ use graph_core::models::*;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+use rayon::prelude::*;
 use walkdir::WalkDir;
 
 #[allow(dead_code)]
@@ -15,6 +19,18 @@ pub struct GwtModuleInfo {
     pub entry_points: Vec<String>,
     pub source_paths: Vec<String>,
     pub servlets: Vec<(String, String)>, // (path, class_name)
+}
+
+fn chrono_or_simple_time() -> String {
+    use std::time::SystemTime;
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let secs = now % 60;
+    let mins = (now / 60) % 60;
+    let hours = (now / 3600 + 3) % 24; // Local timezone offset approximation
+    format!("{:02}:{:02}:{:02}", hours, mins, secs)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -76,12 +92,49 @@ impl NativeJavaScanner {
     }
 
     pub fn scan_project(&self, root_dir: &Path) -> Result<ProjectModel> {
-        let start_time = std::time::Instant::now();
+        self.scan_project_with_progress(root_dir, |_| {})
+    }
+
+    pub fn scan_project_with_progress<F>(&self, root_dir: &Path, mut on_progress: F) -> Result<ProjectModel>
+    where
+        F: FnMut(ScanProgress) + Send + Sync,
+    {
+        let start_time = Instant::now();
         let project_name = root_dir
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("java-project")
             .to_string();
+
+        let mut progress_logs = Vec::new();
+        let add_log = |logs: &mut Vec<String>, msg: &str| {
+            let time_str = chrono_or_simple_time();
+            let line = format!("[{}] {}", time_str, msg);
+            println!("{}", line);
+            logs.push(line);
+        };
+
+        add_log(&mut progress_logs, &format!("🚀 Початок сканування проєкту '{}'...", project_name));
+
+        on_progress(ScanProgress {
+            is_scanning: true,
+            stage: "Виявлення структури модулів та файлів".to_string(),
+            stage_index: 1,
+            total_stages: 4,
+            processed_items: 0,
+            total_items: 0,
+            percentage: 5.0,
+            current_file: None,
+            modules_found: 0,
+            packages_found: 0,
+            classes_found: 0,
+            relationships_found: 0,
+            elapsed_ms: start_time.elapsed().as_millis() as u64,
+            speed_items_per_sec: 0.0,
+            eta_seconds: 0.0,
+            logs: progress_logs.clone(),
+            error: None,
+        });
 
         let mut model = ProjectModel {
             project_name: project_name.clone(),
@@ -100,16 +153,83 @@ impl NativeJavaScanner {
         let gwt_modules = self.discover_gwt_modules(root_dir);
         let web_servlets = self.discover_web_xml_servlets(root_dir);
 
-        // 3. Scan all .java files
+        // Fast discovery of .java files with early pruning of build/cache directories
+        let mut java_files: Vec<PathBuf> = Vec::new();
+        let walker = WalkDir::new(root_dir).into_iter().filter_entry(|e| {
+            let name = e.file_name().to_str().unwrap_or("");
+            !(e.file_type().is_dir()
+                && (name.starts_with('.')
+                    || name == "target"
+                    || name == "build"
+                    || name == "node_modules"
+                    || name == "bin"
+                    || name == "out"
+                    || name == "dist"
+                    || name == "data"
+                    || name == ".tools"
+                    || name == ".javalens"))
+        });
+
+        for entry in walker.filter_map(|e| e.ok()) {
+            if entry.file_type().is_file()
+                && entry.path().extension().and_then(|s| s.to_str()) == Some("java")
+            {
+                java_files.push(entry.path().to_path_buf());
+            }
+        }
+
+        let total_files = java_files.len();
+        add_log(
+            &mut progress_logs,
+            &format!(
+                "📦 [Етап 1/4] Виявлено {} Java файлів у {} модулях (знайдено {} GWT модулів)",
+                total_files,
+                model.modules.len(),
+                gwt_modules.len()
+            ),
+        );
+
+        on_progress(ScanProgress {
+            is_scanning: true,
+            stage: format!("Паралельний парсинг {} класів (Rayon)", total_files),
+            stage_index: 2,
+            total_stages: 4,
+            processed_items: 0,
+            total_items: total_files,
+            percentage: 12.0,
+            current_file: None,
+            modules_found: model.modules.len(),
+            packages_found: 0,
+            classes_found: 0,
+            relationships_found: 0,
+            elapsed_ms: start_time.elapsed().as_millis() as u64,
+            speed_items_per_sec: 0.0,
+            eta_seconds: 0.0,
+            logs: progress_logs.clone(),
+            error: None,
+        });
+
+        // 3. Scan all .java files in parallel with Rayon
+        let processed_counter = Arc::new(AtomicUsize::new(0));
+        let _last_log_time = Arc::new(Mutex::new(Instant::now()));
+
+        let modules_ref = &model.modules;
+        let gwt_modules_ref = &gwt_modules;
+
+        let parsed_results: Vec<Result<Vec<ClassInfo>>> = java_files
+            .par_iter()
+            .map(|file_path| {
+                let res = self.parse_java_file(file_path, root_dir, modules_ref, gwt_modules_ref);
+                processed_counter.fetch_add(1, Ordering::Relaxed);
+                res
+            })
+            .collect();
+
         let mut classes_by_simple_name: HashMap<String, Vec<String>> = HashMap::new();
         let mut package_map: HashMap<String, PackageInfo> = HashMap::new();
 
-        for entry in WalkDir::new(root_dir)
-            .into_iter()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("java"))
-        {
-            if let Ok(class_infos) = self.parse_java_file(entry.path(), root_dir, &model.modules, &gwt_modules) {
+        for res in parsed_results {
+            if let Ok(class_infos) = res {
                 for class_info in class_infos {
                     classes_by_simple_name
                         .entry(class_info.name.clone())
@@ -133,6 +253,43 @@ impl NativeJavaScanner {
                 }
             }
         }
+
+        let total_classes = model.classes.len();
+        let total_packages = package_map.len();
+        let parse_elapsed = start_time.elapsed().as_secs_f64();
+        let parse_speed = if parse_elapsed > 0.0 {
+            total_files as f64 / parse_elapsed
+        } else {
+            0.0
+        };
+
+        add_log(
+            &mut progress_logs,
+            &format!(
+                "⚡ [Етап 2/4] Синтаксичний аналіз завершено: {} класів у {} пакетах ({:.0} файлів/сек)",
+                total_classes, total_packages, parse_speed
+            ),
+        );
+
+        on_progress(ScanProgress {
+            is_scanning: true,
+            stage: "Резолвінг зв'язків та GWT RPC мостів".to_string(),
+            stage_index: 3,
+            total_stages: 4,
+            processed_items: total_files,
+            total_items: total_files,
+            percentage: 65.0,
+            current_file: None,
+            modules_found: model.modules.len(),
+            packages_found: total_packages,
+            classes_found: total_classes,
+            relationships_found: 0,
+            elapsed_ms: start_time.elapsed().as_millis() as u64,
+            speed_items_per_sec: parse_speed,
+            eta_seconds: 0.0,
+            logs: progress_logs.clone(),
+            error: None,
+        });
 
         // 4. Resolve GWT RPC Mappings & Bridge Connections
         let gwt_rpc_mappings = self.build_gwt_rpc_mappings(&model.classes, &gwt_modules, &web_servlets);
@@ -364,9 +521,70 @@ impl NativeJavaScanner {
             }
         }
 
+        let total_relations = relationships.len();
+        add_log(
+            &mut progress_logs,
+            &format!(
+                "🔗 [Етап 3/4] Резолвінг залежностей: побудовано {} зв'язків",
+                total_relations
+            ),
+        );
+
+        on_progress(ScanProgress {
+            is_scanning: true,
+            stage: "Розрахунок архітектурних метрик та NoSQL збереження".to_string(),
+            stage_index: 4,
+            total_stages: 4,
+            processed_items: total_files,
+            total_items: total_files,
+            percentage: 92.0,
+            current_file: None,
+            modules_found: model.modules.len(),
+            packages_found: total_packages,
+            classes_found: total_classes,
+            relationships_found: total_relations,
+            elapsed_ms: start_time.elapsed().as_millis() as u64,
+            speed_items_per_sec: parse_speed,
+            eta_seconds: 0.0,
+            logs: progress_logs.clone(),
+            error: None,
+        });
+
         model.packages = package_map.into_values().collect();
         model.relationships = relationships;
         model.scan_time_ms = start_time.elapsed().as_millis() as u64;
+
+        add_log(
+            &mut progress_logs,
+            &format!(
+                "✅ [Етап 4/4] Сканування успішно завершено за {:.2}с ({} модулів, {} пакетів, {} класів, {} зв'язків)",
+                model.scan_time_ms as f64 / 1000.0,
+                model.modules.len(),
+                model.packages.len(),
+                model.classes.len(),
+                model.relationships.len()
+            ),
+        );
+
+        on_progress(ScanProgress {
+            is_scanning: false,
+            stage: "Сканування завершено".to_string(),
+            stage_index: 4,
+            total_stages: 4,
+            processed_items: total_files,
+            total_items: total_files,
+            percentage: 100.0,
+            current_file: None,
+            modules_found: model.modules.len(),
+            packages_found: model.packages.len(),
+            classes_found: model.classes.len(),
+            relationships_found: model.relationships.len(),
+            elapsed_ms: model.scan_time_ms,
+            speed_items_per_sec: parse_speed,
+            eta_seconds: 0.0,
+            logs: progress_logs,
+            error: None,
+        });
 
         Ok(model)
     }

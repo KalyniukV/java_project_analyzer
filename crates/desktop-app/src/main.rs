@@ -24,6 +24,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         current_analyzer: Arc::new(RwLock::new(None)),
         storage: storage.clone(),
+        scan_progress: Arc::new(RwLock::new(graph_core::models::ScanProgress::default())),
     };
 
     // If a path is provided in arguments, pre-scan it

@@ -18,6 +18,7 @@ use tower_http::cors::CorsLayer;
 pub struct AppState {
     pub current_analyzer: Arc<RwLock<Option<GraphAnalyzer>>>,
     pub storage: Arc<StorageManager>,
+    pub scan_progress: Arc<RwLock<ScanProgress>>,
 }
 
 #[derive(Deserialize)]
@@ -105,6 +106,7 @@ pub fn create_router(state: AppState) -> Router {
     let api_router = Router::new()
         .route("/health", get(health_check))
         .route("/scan", post(scan_project_handler))
+        .route("/scan/progress", get(get_scan_progress_handler))
         .route("/project", get(get_project_handler))
         .route("/graph", get(get_graph_handler))
         .route("/cycles", get(get_cycles_handler))
@@ -143,6 +145,13 @@ async fn health_check() -> &'static str {
     "JavaLens Backend OK"
 }
 
+async fn get_scan_progress_handler(
+    State(state): State<AppState>,
+) -> Json<ScanProgress> {
+    let progress = state.scan_progress.read().await.clone();
+    Json(progress)
+}
+
 async fn scan_project_handler(
     State(state): State<AppState>,
     Json(payload): Json<ScanRequest>,
@@ -155,7 +164,17 @@ async fn scan_project_handler(
         ));
     }
 
-    match ProjectScanner::scan(&path) {
+    let progress_state = state.scan_progress.clone();
+
+    let scan_result = ProjectScanner::scan_with_progress(&path, move |prog| {
+        let p_state = progress_state.clone();
+        tokio::spawn(async move {
+            let mut lock = p_state.write().await;
+            *lock = prog;
+        });
+    });
+
+    match scan_result {
         Ok(model) => {
             let mut analyzer = GraphAnalyzer::new(model.clone());
             analyzer.calculate_metrics();
@@ -179,10 +198,16 @@ async fn scan_project_handler(
 
             Ok(Json(resp))
         }
-        Err(e) => Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Scan failed: {}", e),
-        )),
+        Err(e) => {
+            let mut p_lock = state.scan_progress.write().await;
+            p_lock.is_scanning = false;
+            p_lock.error = Some(e.to_string());
+            p_lock.logs.push(format!("[ERROR] Помилка сканування: {}", e));
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to scan project: {}", e),
+            ))
+        }
     }
 }
 

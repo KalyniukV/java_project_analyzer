@@ -232,6 +232,51 @@ pub struct VisualGraphPayload {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanProgress {
+    pub is_scanning: bool,
+    pub stage: String,
+    pub stage_index: usize,
+    pub total_stages: usize,
+    pub processed_items: usize,
+    pub total_items: usize,
+    pub percentage: f32,
+    pub current_file: Option<String>,
+    pub modules_found: usize,
+    pub packages_found: usize,
+    pub classes_found: usize,
+    pub relationships_found: usize,
+    pub elapsed_ms: u64,
+    pub speed_items_per_sec: f64,
+    pub eta_seconds: f64,
+    pub logs: Vec<String>,
+    pub error: Option<String>,
+}
+
+impl Default for ScanProgress {
+    fn default() -> Self {
+        Self {
+            is_scanning: false,
+            stage: "Ready".to_string(),
+            stage_index: 0,
+            total_stages: 4,
+            processed_items: 0,
+            total_items: 0,
+            percentage: 0.0,
+            current_file: None,
+            modules_found: 0,
+            packages_found: 0,
+            classes_found: 0,
+            relationships_found: 0,
+            elapsed_ms: 0,
+            speed_items_per_sec: 0.0,
+            eta_seconds: 0.0,
+            logs: Vec::new(),
+            error: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CycleInfo {
     pub id: String,
     pub cycle_type: String, // "module_cycle", "package_cycle", "class_cycle"

@@ -212,6 +212,26 @@ export interface ScanResponse {
   saved_to_nosql?: boolean;
 }
 
+export interface ScanProgress {
+  is_scanning: boolean;
+  stage: string;
+  stage_index: number;
+  total_stages: number;
+  processed_items: number;
+  total_items: number;
+  percentage: number;
+  current_file?: string;
+  modules_found: number;
+  packages_found: number;
+  classes_found: number;
+  relationships_found: number;
+  elapsed_ms: number;
+  speed_items_per_sec: number;
+  eta_seconds: number;
+  logs: string[];
+  error?: string;
+}
+
 export interface DirEntryInfo {
   name: string;
   path: string;

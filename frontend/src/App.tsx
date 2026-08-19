@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { ProjectModel, VisualGraphPayload } from './types';
-import { scanProject, getProject, getGraph, loadStoredProject } from './api/client';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ProjectModel, VisualGraphPayload, ScanProgress } from './types';
+import { scanProject, getProject, getGraph, loadStoredProject, getScanProgress } from './api/client';
 import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { InspectorPanel } from './components/inspector/InspectorPanel';
@@ -11,6 +11,7 @@ import { ImpactView } from './components/views/ImpactView';
 import { DriftView } from './components/views/DriftView';
 import { ExtractionView } from './components/views/ExtractionView';
 import { CallHierarchyModal } from './components/CallHierarchyModal';
+import { ScanProgressModal } from './components/ScanProgressModal';
 
 export function App() {
   const [project, setProject] = useState<ProjectModel | null>(null);
@@ -26,6 +27,12 @@ export function App() {
   const [graphData, setGraphData] = useState<VisualGraphPayload | null>(null);
   const [isScanning, setIsScanning] = useState<boolean>(false);
 
+  // Scan Progress Modal State
+  const [scanProgress, setScanProgress] = useState<ScanProgress | null>(null);
+  const [showProgressModal, setShowProgressModal] = useState<boolean>(false);
+  const [scanningPath, setScanningPath] = useState<string>('');
+  const progressIntervalRef = useRef<any>(null);
+
   // Scoping Filters: Module, Package, and Boundary/External connections
   const [selectedModules, setSelectedModules] = useState<string[]>([]);
   const [selectedPackages, setSelectedPackages] = useState<string[]>([]);
@@ -33,11 +40,34 @@ export function App() {
 
   const defaultFixturePath = 'd:/antigravity/java_project_analyzer/fixtures/sample-petclinic';
 
-  // Load or scan project
+  // Load or scan project with real-time progress streaming
   const handleScanPath = useCallback(async (path: string) => {
     try {
       setIsScanning(true);
+      setScanningPath(path);
+      setShowProgressModal(true);
+
+      // Start live polling of progress
+      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current);
+      progressIntervalRef.current = setInterval(async () => {
+        try {
+          const prog = await getScanProgress();
+          setScanProgress(prog);
+        } catch {
+          // ignore transient poll errors
+        }
+      }, 100);
+
       await scanProject(path);
+
+      // Final progress fetch
+      try {
+        const finalProg = await getScanProgress();
+        setScanProgress(finalProg);
+      } catch {
+        // ignore
+      }
+
       const proj = await getProject();
       setProject(proj);
       setSelectedNodeId(null);
@@ -46,6 +76,10 @@ export function App() {
     } catch (err) {
       console.error('Scan error:', err);
     } finally {
+      if (progressIntervalRef.current) {
+        clearInterval(progressIntervalRef.current);
+        progressIntervalRef.current = null;
+      }
       setIsScanning(false);
     }
   }, []);
@@ -112,45 +146,27 @@ export function App() {
     []
   );
 
+  // Clear canvas selection
   const handleCanvasClick = () => {
     setSelectedNodeId(null);
   };
 
-  // Module filter handlers
-  const handleToggleModule = (moduleId: string) => {
-    setSelectedModules((prev) => {
-      if (prev.includes(moduleId)) {
-        return prev.filter((id) => id !== moduleId);
-      } else {
-        return [...prev, moduleId];
-      }
-    });
-  };
-
-  const handleSelectOnlyModule = (moduleId: string) => {
-    setSelectedModules([moduleId]);
+  // Module filter helpers
+  const handleToggleModuleFilter = (moduleId: string) => {
+    setSelectedModules((prev) =>
+      prev.includes(moduleId) ? prev.filter((m) => m !== moduleId) : [...prev, moduleId]
+    );
   };
 
   const handleClearModuleFilter = () => {
     setSelectedModules([]);
   };
 
-  // Package filter handlers
-  const handleTogglePackage = (packageId: string) => {
-    setSelectedPackages((prev) => {
-      if (prev.includes(packageId)) {
-        return prev.filter((id) => id !== packageId);
-      } else {
-        return [...prev, packageId];
-      }
-    });
-  };
-
-  const handleSelectOnlyPackage = (packageId: string) => {
-    setSelectedPackages([packageId]);
-    if (activeTab === 'modules') {
-      setActiveTab('classes');
-    }
+  // Package filter helpers
+  const handleTogglePackageFilter = (pkgName: string) => {
+    setSelectedPackages((prev) =>
+      prev.includes(pkgName) ? prev.filter((p) => p !== pkgName) : [...prev, pkgName]
+    );
   };
 
   const handleClearPackageFilter = () => {
@@ -158,15 +174,12 @@ export function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#0d1117]">
-      {/* Header */}
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#0d1117] text-slate-100 font-sans">
+      {/* Top Header Bar */}
       <Header
         project={project}
         activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab);
-          setSelectedNodeId(null);
-        }}
+        onTabChange={setActiveTab}
         depth={depth}
         onDepthChange={setDepth}
         isolateMode={isolateMode}
@@ -176,9 +189,9 @@ export function App() {
         isScanning={isScanning}
       />
 
-      {/* Main Workspace */}
+      {/* Main Workspace: Left Sidebar, Center Canvas, Right Inspector */}
       <div className="flex flex-1 overflow-hidden relative">
-        {/* Sidebar only on graph views */}
+        {/* Left Sidebar for Classes, Packages, and Modules */}
         {(activeTab === 'modules' || activeTab === 'packages' || activeTab === 'classes') && (
           <Sidebar
             project={project}
@@ -190,12 +203,12 @@ export function App() {
             hideDTOs={hideDTOs}
             onToggleHideDTOs={() => setHideDTOs(!hideDTOs)}
             selectedModules={selectedModules}
-            onToggleModule={handleToggleModule}
-            onSelectOnlyModule={handleSelectOnlyModule}
+            onToggleModule={handleToggleModuleFilter}
+            onSelectOnlyModule={(m) => setSelectedModules([m])}
             onClearModuleFilter={handleClearModuleFilter}
             selectedPackages={selectedPackages}
-            onTogglePackage={handleTogglePackage}
-            onSelectOnlyPackage={handleSelectOnlyPackage}
+            onTogglePackage={handleTogglePackageFilter}
+            onSelectOnlyPackage={(p) => setSelectedPackages([p])}
             onClearPackageFilter={handleClearPackageFilter}
             includeExternal={includeExternal}
             onToggleIncludeExternal={() => setIncludeExternal(!includeExternal)}
@@ -258,6 +271,14 @@ export function App() {
         onClose={() => setCallHierarchyTarget(null)}
         targetId={callHierarchyTarget}
         onNavigateToClass={(classId) => handleNavigateToGraph(classId, 'classes')}
+      />
+
+      {/* Scan Progress & Live Logs Modal for 100k+ classes */}
+      <ScanProgressModal
+        isOpen={showProgressModal}
+        progress={scanProgress}
+        scanningPath={scanningPath}
+        onClose={() => setShowProgressModal(false)}
       />
     </div>
   );
