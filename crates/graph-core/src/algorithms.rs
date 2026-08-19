@@ -801,11 +801,21 @@ impl GraphAnalyzer {
     /// 3. MICROSERVICE EXTRACTION: Analyze blockers and readiness to extract a module/package
     pub fn analyze_microservice_extraction(&self, target_id: &str) -> MicroserviceExtractionAnalysis {
         let is_module = self.model.modules.iter().any(|m| m.id == target_id);
+        let is_class = self.model.classes.iter().any(|c| c.id == target_id);
 
         let target_classes: HashSet<String> = if is_module {
             self.model.classes.iter().filter(|c| c.module_name == target_id).map(|c| c.id.clone()).collect()
+        } else if is_class {
+            let mut set = HashSet::new();
+            set.insert(target_id.to_string());
+            set
         } else {
-            self.model.classes.iter().filter(|c| c.package_name == target_id).map(|c| c.id.clone()).collect()
+            self.model
+                .classes
+                .iter()
+                .filter(|c| c.package_name == target_id || c.package_name.starts_with(&format!("{}.", target_id)))
+                .map(|c| c.id.clone())
+                .collect()
         };
 
         let target_name = target_id.to_string();
@@ -813,6 +823,8 @@ impl GraphAnalyzer {
 
         let mut inbound_blockers = Vec::new();
         let mut outbound_blockers = Vec::new();
+        let mut seen_inbound = HashSet::new();
+        let mut seen_outbound = HashSet::new();
         let mut external_dependencies_count = 0;
 
         for rel in &self.model.relationships {
@@ -825,32 +837,38 @@ impl GraphAnalyzer {
 
             // Inbound blocker: outside -> inside
             if !src_in && tgt_in {
-                inbound_blockers.push(ExtractionBlocker {
-                    source: rel.source.clone(),
-                    target: rel.target.clone(),
-                    description: format!("Зовнішній клас '{}' викликає внутрішній '{}'", rel.source.split('.').last().unwrap_or(&rel.source), rel.target.split('.').last().unwrap_or(&rel.target)),
-                    blocker_type: "Inbound Dependency".to_string(),
-                    solution_hint: "Обернути в REST/gRPC API або винести інтерфейс клієнта".to_string(),
-                });
+                let pair_key = format!("{}->{}", rel.source, rel.target);
+                if seen_inbound.insert(pair_key) {
+                    inbound_blockers.push(ExtractionBlocker {
+                        source: rel.source.clone(),
+                        target: rel.target.clone(),
+                        description: format!("Зовнішній клас '{}' викликає внутрішній '{}'", rel.source.split('.').last().unwrap_or(&rel.source), rel.target.split('.').last().unwrap_or(&rel.target)),
+                        blocker_type: "Inbound Dependency".to_string(),
+                        solution_hint: "Обернути в REST/gRPC API або винести інтерфейс клієнта".to_string(),
+                    });
+                }
             }
 
             // Outbound blocker: inside -> outside
             if src_in && !tgt_in {
                 external_dependencies_count += 1;
-                outbound_blockers.push(ExtractionBlocker {
-                    source: rel.source.clone(),
-                    target: rel.target.clone(),
-                    description: format!("Внутрішній клас '{}' залежить від зовнішнього '{}'", rel.source.split('.').last().unwrap_or(&rel.source), rel.target.split('.').last().unwrap_or(&rel.target)),
-                    blocker_type: "Outbound Tight Coupling".to_string(),
-                    solution_hint: "Застосувати патерн Event-Driven Messaging або ін'єкцію через адаптер".to_string(),
-                });
+                let pair_key = format!("{}->{}", rel.source, rel.target);
+                if seen_outbound.insert(pair_key) {
+                    outbound_blockers.push(ExtractionBlocker {
+                        source: rel.source.clone(),
+                        target: rel.target.clone(),
+                        description: format!("Внутрішній клас '{}' залежить від зовнішнього '{}'", rel.source.split('.').last().unwrap_or(&rel.source), rel.target.split('.').last().unwrap_or(&rel.target)),
+                        blocker_type: "Outbound Tight Coupling".to_string(),
+                        solution_hint: "Застосувати патерн Event-Driven Messaging або ін'єкцію через адаптер".to_string(),
+                    });
+                }
             }
         }
 
         let total_blockers = inbound_blockers.len() + outbound_blockers.len();
         let mut readiness_score: u32 = 100;
         if total_blockers > 0 {
-            let penalty = (total_blockers * 6).min(85) as u32;
+            let penalty = (total_blockers * 7).min(85) as u32;
             readiness_score = readiness_score.saturating_sub(penalty);
         }
 
