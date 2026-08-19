@@ -257,16 +257,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 px-2 py-1 flex items-center justify-between">
           <span className="flex items-center gap-1">
-            <Layers className="w-3 h-3 text-sky-400" /> Класи ({filteredClasses.length})
+            <Layers className="w-3 h-3 text-sky-400" /> Класи ({filteredClasses.length.toLocaleString()})
           </span>
+          {visiblePackages.length > 50 && (
+            <span className="text-[9px] text-amber-400 font-mono">
+              ⚡ Топ-{Math.min(50, visiblePackages.length)}
+            </span>
+          )}
         </div>
 
-        {visiblePackages.map((pkg: PackageInfo) => {
+        {visiblePackages.slice(0, 50).map((pkg: PackageInfo) => {
           if (hasPackageFilter && !selectedPackages.includes(pkg.id)) return null;
 
-          const isExpanded = expandedPkgs[pkg.id] ?? true;
+          const isExpanded = expandedPkgs[pkg.id] ?? (visiblePackages.length <= 8);
           const pkgClasses = filteredClasses.filter((c: ClassInfo) => c.package_name === pkg.id);
           if (searchTerm && pkgClasses.length === 0) return null;
+
+          const renderedClasses = searchTerm ? pkgClasses : pkgClasses.slice(0, 30);
 
           return (
             <div key={pkg.id} className="space-y-0.5">
@@ -311,7 +318,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               {/* Classes in Package */}
               {isExpanded && (
                 <div className="pl-4 space-y-0.5 border-l border-white/5 ml-3">
-                  {pkgClasses.map((cls: ClassInfo) => {
+                  {renderedClasses.map((cls: ClassInfo) => {
                     const isSelected = selectedNodeId === cls.id;
                     return (
                       <button
@@ -334,11 +341,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       </button>
                     );
                   })}
+                  {!searchTerm && pkgClasses.length > 30 && (
+                    <div className="text-[10px] font-mono text-slate-400 px-2 py-0.5 italic">
+                      +ще {pkgClasses.length - 30} класів (введіть пошук)
+                    </div>
+                  )}
                 </div>
               )}
             </div>
           );
         })}
+
+        {visiblePackages.length > 50 && !searchTerm && (
+          <div className="p-3 text-center text-[11px] font-mono text-slate-400 border-t border-white/5">
+            Показано перші 50 пакетів із {visiblePackages.length}.
+            <br />
+            <span className="text-sky-400">Скористайтеся пошуком вище 🔍</span>
+          </div>
+        )}
       </div>
     </div>
   );

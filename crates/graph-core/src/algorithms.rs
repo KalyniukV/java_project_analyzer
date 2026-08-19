@@ -298,6 +298,13 @@ impl GraphAnalyzer {
                     }
                 }
 
+                // Smart limit for massive 100k+ projects when no filter or node is selected
+                if core_ids.len() > 250 && selected_id.is_none() && !has_filter {
+                    let mut sorted_packages = self.model.packages.clone();
+                    sorted_packages.sort_by(|a, b| b.class_ids.len().cmp(&a.class_ids.len()));
+                    core_ids = sorted_packages.into_iter().take(200).map(|p| p.id).collect();
+                }
+
                 // If include_external, find neighbor packages that connect with core_ids
                 let mut boundary_ids: HashSet<String> = HashSet::new();
                 if include_external && has_filter {
@@ -380,6 +387,23 @@ impl GraphAnalyzer {
                     if mod_ok && pkg_ok {
                         core_ids.insert(c.id.clone());
                     }
+                }
+
+                // Smart limit for massive 100k+ projects when no filter or node is selected
+                if core_ids.len() > 300 && selected_id.is_none() && !has_filter {
+                    let mut sorted_classes = self.model.classes.clone();
+                    sorted_classes.sort_by(|a, b| {
+                        let is_key_a = a.annotations.iter().any(|an| {
+                            an.contains("Controller") || an.contains("Service") || an.contains("Endpoint") || an.contains("RemoteService") || an.contains("Repository")
+                        });
+                        let is_key_b = b.annotations.iter().any(|an| {
+                            an.contains("Controller") || an.contains("Service") || an.contains("Endpoint") || an.contains("RemoteService") || an.contains("Repository")
+                        });
+                        let score_a = if is_key_a { 1000 + a.methods.len() } else { a.methods.len() };
+                        let score_b = if is_key_b { 1000 + b.methods.len() } else { b.methods.len() };
+                        score_b.cmp(&score_a)
+                    });
+                    core_ids = sorted_classes.into_iter().take(250).map(|c| c.id).collect();
                 }
 
                 // If include_external, find neighbor classes outside core_ids that connect with core_ids
@@ -477,8 +501,7 @@ impl GraphAnalyzer {
         // 2. If a node is selected, apply the Highlight & Isolation Engine
         let total_nodes = visual_nodes.len();
         let total_edges = visual_edges.len();
-        let cycles = self.find_cycles(view_type);
-        let cycles_count = cycles.len();
+        let cycles_count = visual_edges.iter().filter(|e| e.is_circular).count();
 
         if let Some(target_id) = selected_id {
             let mut forward_adj: HashMap<&str, Vec<&str>> = HashMap::new();
