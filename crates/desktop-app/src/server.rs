@@ -419,12 +419,15 @@ async fn delete_stored_project_handler(
 }
 
 async fn pick_folder_handler() -> Result<Json<PickFolderResponse>, (StatusCode, String)> {
-    let folder = rfd::AsyncFileDialog::new()
+    let dialog_fut = rfd::AsyncFileDialog::new()
         .set_title("Виберіть каталог Java проєкту")
-        .pick_folder()
-        .await;
+        .pick_folder();
 
-    let path = folder.map(|f| f.path().to_string_lossy().to_string());
+    let path = match tokio::time::timeout(std::time::Duration::from_secs(10), dialog_fut).await {
+        Ok(folder) => folder.map(|f| f.path().to_string_lossy().to_string()),
+        Err(_) => None, // Timed out (e.g. headless/Linux without display)
+    };
+
     Ok(Json(PickFolderResponse { path }))
 }
 

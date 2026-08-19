@@ -48,8 +48,9 @@ export const ProjectPickerModal: React.FC<ProjectPickerModalProps> = ({
   const [customPath, setCustomPath] = useState('');
   const [isBrowsing, setIsBrowsing] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [isNativePicking, setIsNativePicking] = useState(false);
 
-  const samplePath = 'd:/antigravity/java_project_analyzer/fixtures/sample-petclinic';
+  const samplePath = 'fixtures/sample-petclinic';
 
   // Load initial browse & stored list
   useEffect(() => {
@@ -74,6 +75,7 @@ export const ProjectPickerModal: React.FC<ProjectPickerModalProps> = ({
 
   const handleNativePick = async () => {
     try {
+      setIsNativePicking(true);
       const picked = await pickFolderNative();
       if (picked) {
         setCustomPath(picked);
@@ -82,6 +84,8 @@ export const ProjectPickerModal: React.FC<ProjectPickerModalProps> = ({
       }
     } catch (err) {
       console.error('Native pick error:', err);
+    } finally {
+      setIsNativePicking(false);
     }
   };
 

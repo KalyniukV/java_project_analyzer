@@ -79,12 +79,26 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {isDone && (
+            {isDone ? (
               <button
                 onClick={onClose}
-                className="px-4 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold transition shadow-lg shadow-sky-600/30 flex items-center gap-1.5"
+                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition shadow-lg shadow-emerald-600/30 flex items-center gap-1.5"
               >
                 <span>Перейти до графу</span>
+              </button>
+            ) : hasError ? (
+              <button
+                onClick={onClose}
+                className="px-4 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition shadow-lg shadow-rose-600/30 flex items-center gap-1.5"
+              >
+                <span>Закрити вікно</span>
+              </button>
+            ) : (
+              <button
+                onClick={onClose}
+                className="px-3 py-1.5 rounded-lg bg-[#21262d] hover:bg-[#30363d] text-slate-300 text-xs font-medium transition"
+              >
+                <span>Згорнути</span>
               </button>
             )}
             <button
@@ -98,6 +112,22 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
         </div>
 
         <div className="p-6 space-y-6 overflow-y-auto">
+          {/* Error Banner */}
+          {hasError && (
+            <div className="p-4 rounded-xl bg-rose-950/60 border border-rose-500/50 text-rose-200 text-xs flex items-center justify-between gap-3">
+              <div>
+                <span className="font-bold text-rose-300">Помилка сканування: </span>
+                <span>{progress?.error}</span>
+              </div>
+              <button
+                onClick={onClose}
+                className="px-3 py-1 rounded bg-rose-600/40 hover:bg-rose-600 border border-rose-500/60 text-white text-[11px] font-bold flex-shrink-0 transition"
+              >
+                Вибрати інший каталог
+              </button>
+            </div>
+          )}
+
           {/* 4-Stage Step Bar */}
           <div className="grid grid-cols-4 gap-2">
             {stages.map((st) => {

@@ -38,10 +38,9 @@ export function App() {
   const [selectedPackages, setSelectedPackages] = useState<string[]>([]);
   const [includeExternal, setIncludeExternal] = useState<boolean>(true);
 
-  const defaultFixturePath = 'd:/antigravity/java_project_analyzer/fixtures/sample-petclinic';
-
   // Load or scan project with real-time progress streaming
   const handleScanPath = useCallback(async (path: string) => {
+    if (!path || !path.trim()) return;
     try {
       setIsScanning(true);
       setScanningPath(path);
@@ -56,7 +55,7 @@ export function App() {
         } catch {
           // ignore transient poll errors
         }
-      }, 100);
+      }, 120);
 
       await scanProject(path);
 
@@ -73,8 +72,26 @@ export function App() {
       setSelectedNodeId(null);
       setSelectedModules([]);
       setSelectedPackages([]);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Scan error:', err);
+      setScanProgress((prev) => ({
+        is_scanning: false,
+        stage: 'Помилка сканування',
+        stage_index: 0,
+        total_stages: 4,
+        processed_items: 0,
+        total_items: 0,
+        percentage: 0,
+        modules_found: 0,
+        packages_found: 0,
+        classes_found: 0,
+        relationships_found: 0,
+        elapsed_ms: 0,
+        speed_items_per_sec: 0,
+        eta_seconds: 0,
+        logs: prev?.logs ? [...prev.logs, `[ERROR] ${err?.message || err}`] : [`[ERROR] ${err?.message || err}`],
+        error: err?.message || String(err),
+      }));
     } finally {
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
@@ -101,9 +118,30 @@ export function App() {
     }
   }, []);
 
-  // Initial load
+  // Initial load: check if project already loaded or try relative fixture
   useEffect(() => {
-    handleScanPath(defaultFixturePath);
+    let isMounted = true;
+    (async () => {
+      try {
+        const current = await getProject();
+        if (isMounted && current) {
+          setProject(current);
+          return;
+        }
+      } catch {
+        // No project pre-loaded
+      }
+
+      try {
+        await handleScanPath('fixtures/sample-petclinic');
+      } catch {
+        // Ready for user to choose
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
   }, [handleScanPath]);
 
   // Fetch updated graph when tab, selected node, depth, isolate mode, module/package filters, or external toggle change
