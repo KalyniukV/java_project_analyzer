@@ -103,6 +103,19 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       })
       .map((edge: VisualGraphEdge) => {
         const isHighlighted = edge.highlight_state !== 'Normal' && edge.highlight_state !== 'Dimmed';
+        const isIndirect = edge.hop_depth !== undefined && edge.hop_depth >= 2;
+
+        let markerColor = '#4b5563';
+        if (edge.highlight_state === 'InboundActive') {
+          markerColor = isIndirect ? '#818cf8' : '#38bdf8';
+        } else if (edge.highlight_state === 'OutboundActive') {
+          markerColor = isIndirect ? '#fbbf24' : (edge.kind === 'GwtRpcCall' || edge.kind === 'GwtRpcBinding' ? '#e879f9' : '#fb923c');
+        } else if (edge.is_circular) {
+          markerColor = '#ef4444';
+        } else if (edge.kind === 'GwtRpcCall' || edge.kind === 'GwtRpcBinding') {
+          markerColor = '#c084fc';
+        }
+
         return {
           id: edge.id,
           source: edge.source,
@@ -111,18 +124,11 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           data: { ...edge },
           markerEnd: {
             type: MarkerType.ArrowClosed,
-            width: 14,
-            height: 14,
-            color:
-              edge.highlight_state === 'InboundActive'
-                ? '#38bdf8'
-                : edge.highlight_state === 'OutboundActive'
-                ? (edge.kind === 'GwtRpcCall' || edge.kind === 'GwtRpcBinding' ? '#e879f9' : '#fb923c')
-                : edge.is_circular
-                ? '#ef4444'
-                : (edge.kind === 'GwtRpcCall' || edge.kind === 'GwtRpcBinding' ? '#c084fc' : '#4b5563'),
+            width: isIndirect ? 11 : isHighlighted ? 16 : 12,
+            height: isIndirect ? 11 : isHighlighted ? 16 : 12,
+            color: markerColor,
           },
-          animated: isHighlighted || edge.kind === 'GwtRpcCall',
+          animated: isHighlighted && !isIndirect,
         };
       });
 

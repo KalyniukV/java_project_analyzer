@@ -550,16 +550,18 @@ impl GraphAnalyzer {
 
             // Classify edges & set hop_depth
             for edge in &mut visual_edges {
-                if edge.source == target_id || edge.target == target_id {
+                let is_direct = edge.source == target_id || edge.target == target_id;
+                let d1 = node_distances.get(&edge.source).copied();
+                let d2 = node_distances.get(&edge.target).copied();
+
+                if is_direct {
                     edge.hop_depth = Some(1);
+                } else if let (Some(s), Some(t)) = (d1, d2) {
+                    // Edge is between nodes in the traversed chain, but not directly touching target_id
+                    let hop = s.max(t).max(2);
+                    edge.hop_depth = Some(hop);
                 } else {
-                    let d1 = node_distances.get(&edge.source).copied();
-                    let d2 = node_distances.get(&edge.target).copied();
-                    if let (Some(s), Some(t)) = (d1, d2) {
-                        edge.hop_depth = Some(s.max(t));
-                    } else {
-                        edge.hop_depth = None;
-                    }
+                    edge.hop_depth = None;
                 }
 
                 if edge.source == target_id && edge.target == target_id {
