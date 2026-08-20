@@ -17,7 +17,9 @@ import {
   Puzzle,
   Download,
   Activity,
-  Award
+  Award,
+  Sun,
+  Moon
 } from 'lucide-react';
 
 interface HeaderProps {
@@ -31,6 +33,8 @@ interface HeaderProps {
   onScanPath: (path: string) => void;
   onLoadFromNoSQL: (path: string) => void;
   isScanning: boolean;
+  theme: 'dark' | 'light';
+  onToggleTheme: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -44,6 +48,8 @@ export const Header: React.FC<HeaderProps> = ({
   onScanPath,
   onLoadFromNoSQL,
   isScanning,
+  theme,
+  onToggleTheme,
 }) => {
   const [showScanModal, setShowScanModal] = useState(false);
   const [health, setHealth] = useState<ArchitectureHealth | null>(null);
@@ -292,12 +298,25 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
+        {/* Theme Toggle (Light / Dark) */}
+        <button
+          onClick={onToggleTheme}
+          className="p-1.5 rounded-xl bg-[#0d1117] hover:bg-[#21262d] border border-[#30363d] text-slate-300 hover:text-white transition-all shadow-sm"
+          title={theme === 'dark' ? 'Увімкнути світлу тему ☀️' : 'Увімкнути темну тему 🌙'}
+        >
+          {theme === 'dark' ? (
+            <Sun className="w-4 h-4 text-amber-400" />
+          ) : (
+            <Moon className="w-4 h-4 text-sky-500" />
+          )}
+        </button>
+
         {/* Rescan Button */}
         {project && (
           <button
             onClick={() => onScanPath(project.root_path)}
             disabled={isScanning}
-            className="p-1.5 rounded-lg bg-[#0d1117] hover:bg-[#21262d] border border-[#30363d] text-slate-300 hover:text-white transition-colors disabled:opacity-50"
+            className="p-1.5 rounded-xl bg-[#0d1117] hover:bg-[#21262d] border border-[#30363d] text-slate-300 hover:text-white transition-colors disabled:opacity-50"
             title="Пересканувати та оновити NoSQL базу"
           >
             <RefreshCw className={`w-4 h-4 ${isScanning ? 'animate-spin text-sky-400' : ''}`} />

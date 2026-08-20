@@ -16,9 +16,25 @@ import { ScanProgressModal } from './components/ScanProgressModal';
 
 export function App() {
   const [project, setProject] = useState<ProjectModel | null>(null);
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    return (localStorage.getItem('javalens_theme') as 'dark' | 'light') || 'dark';
+  });
   const [activeTab, setActiveTab] = useState<
     'modules' | 'packages' | 'classes' | 'matrix' | 'impact' | 'drift' | 'extraction' | 'cycles' | 'metrics'
   >('modules');
+
+  const handleToggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem('javalens_theme', next);
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.className = theme;
+    document.body.className = theme;
+  }, [theme]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [callHierarchyTarget, setCallHierarchyTarget] = useState<string | null>(null);
   const [depth, setDepth] = useState<number>(1);
@@ -248,7 +264,7 @@ export function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#0d1117] text-slate-100 font-sans select-none">
+    <div className={`flex flex-col h-screen w-screen overflow-hidden ${theme} bg-[#0d1117] text-slate-100 font-sans select-none`}>
       {/* Top Header Bar */}
       <Header
         project={project}
@@ -261,6 +277,8 @@ export function App() {
         onScanPath={handleScanPath}
         onLoadFromNoSQL={handleLoadFromNoSQL}
         isScanning={isScanning}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
       />
 
       {/* Main Workspace: Left Sidebar, Center Canvas, Right Inspector */}
