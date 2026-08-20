@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import cytoscape, { Core, EventObject } from 'cytoscape';
 // @ts-ignore
 import dagre from 'cytoscape-dagre';
@@ -88,9 +88,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   }, [graphData, hideDTOs]);
 
   // -------------------------------------------------------------
-  // Run layout algorithm (only when view changes or user switches layout)
+  // Layout Execution Helper
   // -------------------------------------------------------------
-  const runLayout = (cy: Core, mode: string) => {
+  const runLayout = useCallback((cy: Core, mode: string) => {
     let layoutOptions: any;
 
     if (mode === 'dagre') {
@@ -142,99 +142,17 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       const fallback = cy.layout({ name: 'grid', fit: true, padding: 50 });
       fallback.run();
     }
-  };
+  }, []);
 
   // -------------------------------------------------------------
-  // Initialize or incrementally update Cytoscape instance
+  // 1. Initialize Cytoscape ONCE on Mount (Never recreate DOM)
   // -------------------------------------------------------------
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Cache current node positions before any update
-    if (cyRef.current) {
-      cyRef.current.nodes().forEach((n) => {
-        positionsCacheRef.current.set(n.id(), { ...n.position() });
-      });
-    }
-
-    const isViewChanged = lastActiveViewRef.current !== activeView;
-    lastActiveViewRef.current = activeView;
-    if (isViewChanged) {
-      positionsCacheRef.current.clear();
-    }
-
-    // Transform to Cytoscape elements
-    const elements: cytoscape.ElementDefinition[] = [];
-
-    // Nodes
-    for (const node of filteredNodes) {
-      const category = (node.category || '').toLowerCase();
-      const layer = (node.layer || '').toLowerCase();
-      const isInterface = category === 'interface';
-      const isModule = node.category === 'module' || activeView === 'modules';
-      const isPackage = node.category === 'package' || activeView === 'packages';
-      const isExternalNode = node.is_external === true;
-
-      // Build Rich Multiline Label
-      let layerTag = 'CLASS';
-      if (isModule) layerTag = 'MODULE';
-      else if (isPackage) layerTag = 'PACKAGE';
-      else if (isInterface) layerTag = 'INTERFACE';
-      else if (layer === 'ui' || category === 'controller') layerTag = 'CONTROLLER / UI';
-      else if (layer === 'service' || category === 'service') layerTag = 'SERVICE';
-      else if (layer === 'repository' || category === 'repository' || category === 'dao') layerTag = 'REPOSITORY / DAO';
-      else if (layer === 'domain' || category === 'entity') layerTag = 'ENTITY / MODEL';
-      else if (node.sub_label?.includes('GWT')) layerTag = 'GWT RPC';
-
-      const lines: string[] = [];
-      lines.push(`« ${layerTag} »`);
-      lines.push(node.label);
-      if (node.sub_label && !isModule && !isPackage) {
-        lines.push(node.sub_label);
-      }
-      lines.push(`⬇ ${node.degree_in || 0} in  •  ⬆ ${node.degree_out || 0} out`);
-
-      const displayLabel = lines.join('\n');
-      const cachedPos = positionsCacheRef.current.get(node.id);
-
-      elements.push({
-        group: 'nodes',
-        data: {
-          id: node.id,
-          label: node.label,
-          displayLabel: displayLabel,
-          category: category,
-          layer: layer,
-          degreeIn: node.degree_in || 0,
-          degreeOut: node.degree_out || 0,
-          isInterface: isInterface ? 'true' : 'false',
-          isModule: isModule ? 'true' : 'false',
-          isPackage: isPackage ? 'true' : 'false',
-          isExternal: isExternalNode ? 'true' : 'false',
-        },
-        position: cachedPos ? { x: cachedPos.x, y: cachedPos.y } : undefined,
-      });
-    }
-
-    // Edges
-    for (const edge of filteredEdges) {
-      elements.push({
-        group: 'edges',
-        data: {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          label: edge.label || '',
-          kind: edge.kind || '',
-          isCircular: edge.is_circular ? 'true' : 'false',
-        },
-      });
-    }
-
-    // High-Contrast Dark Theme Stylesheet for Cytoscape
     const cy = cytoscape({
       container: containerRef.current,
-      elements: elements,
+      elements: [],
       boxSelectionEnabled: false,
       autounselectify: false,
       minZoom: 0.08,
@@ -493,25 +411,119 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     cyRef.current = cy;
 
-    // Only run layout if positions were not cached (e.g. on view change or first render)
-    const hasUnpositionedNodes = elements.some((e) => e.group === 'nodes' && !e.position);
+    return () => {
+      try {
+        cy.destroy();
+      } catch {}
+      cyRef.current = null;
+    };
+  }, []);
+
+  // -------------------------------------------------------------
+  // 2. Incremental Element Synchronization (No DOM recreation!)
+  // -------------------------------------------------------------
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+
+    // Cache current node positions
+    cy.nodes().forEach((n) => {
+      positionsCacheRef.current.set(n.id(), { ...n.position() });
+    });
+
+    const isViewChanged = lastActiveViewRef.current !== activeView;
+    lastActiveViewRef.current = activeView;
+    if (isViewChanged) {
+      positionsCacheRef.current.clear();
+    }
+
+    // Build Cytoscape element definitions
+    const newElements: cytoscape.ElementDefinition[] = [];
+
+    for (const node of filteredNodes) {
+      const category = (node.category || '').toLowerCase();
+      const layer = (node.layer || '').toLowerCase();
+      const isInterface = category === 'interface';
+      const isModule = node.category === 'module' || activeView === 'modules';
+      const isPackage = node.category === 'package' || activeView === 'packages';
+      const isExternalNode = node.is_external === true;
+
+      let layerTag = 'CLASS';
+      if (isModule) layerTag = 'MODULE';
+      else if (isPackage) layerTag = 'PACKAGE';
+      else if (isInterface) layerTag = 'INTERFACE';
+      else if (layer === 'ui' || category === 'controller') layerTag = 'CONTROLLER / UI';
+      else if (layer === 'service' || category === 'service') layerTag = 'SERVICE';
+      else if (layer === 'repository' || category === 'repository' || category === 'dao') layerTag = 'REPOSITORY / DAO';
+      else if (layer === 'domain' || category === 'entity') layerTag = 'ENTITY / MODEL';
+      else if (node.sub_label?.includes('GWT')) layerTag = 'GWT RPC';
+
+      const lines: string[] = [];
+      lines.push(`« ${layerTag} »`);
+      lines.push(node.label);
+      if (node.sub_label && !isModule && !isPackage) {
+        lines.push(node.sub_label);
+      }
+      lines.push(`⬇ ${node.degree_in || 0} in  •  ⬆ ${node.degree_out || 0} out`);
+
+      const displayLabel = lines.join('\n');
+      const cachedPos = positionsCacheRef.current.get(node.id);
+
+      newElements.push({
+        group: 'nodes',
+        data: {
+          id: node.id,
+          label: node.label,
+          displayLabel: displayLabel,
+          category: category,
+          layer: layer,
+          degreeIn: node.degree_in || 0,
+          degreeOut: node.degree_out || 0,
+          isInterface: isInterface ? 'true' : 'false',
+          isModule: isModule ? 'true' : 'false',
+          isPackage: isPackage ? 'true' : 'false',
+          isExternal: isExternalNode ? 'true' : 'false',
+        },
+        position: cachedPos ? { x: cachedPos.x, y: cachedPos.y } : undefined,
+      });
+    }
+
+    for (const edge of filteredEdges) {
+      newElements.push({
+        group: 'edges',
+        data: {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          label: edge.label || '',
+          kind: edge.kind || '',
+          isCircular: edge.is_circular ? 'true' : 'false',
+        },
+      });
+    }
+
+    // Atomic element replacement in Cytoscape memory (never touches container DOM)
+    cy.batch(() => {
+      cy.elements().remove();
+      cy.add(newElements);
+
+      // Restore cached positions
+      cy.nodes().forEach((n) => {
+        const cached = positionsCacheRef.current.get(n.id());
+        if (cached) {
+          n.position(cached);
+        }
+      });
+    });
+
+    const hasUnpositionedNodes = newElements.some((e) => e.group === 'nodes' && !e.position);
     if (isViewChanged || hasUnpositionedNodes || positionsCacheRef.current.size === 0) {
       runLayout(cy, layoutMode);
     }
-
-    return () => {
-      // Save positions before cleanup
-      if (cyRef.current) {
-        cyRef.current.nodes().forEach((n) => {
-          positionsCacheRef.current.set(n.id(), { ...n.position() });
-        });
-      }
-      cy.destroy();
-    };
-  }, [filteredNodes, filteredEdges, activeView]);
+  }, [filteredNodes, filteredEdges, activeView, runLayout, layoutMode]);
 
   // -------------------------------------------------------------
-  // Pure Visual Selection Effect (ZERO RESHUFFLE, INSTANT STYLING)
+  // 3. Pure Visual Selection Effect (ZERO RESHUFFLE, INSTANT STYLING)
   // -------------------------------------------------------------
   useEffect(() => {
     const cy = cyRef.current;
@@ -598,7 +610,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
   return (
     <div className="relative w-full h-full bg-[#0d1117] overflow-hidden select-none">
-      {/* CYTOSCAPE HTML5 CANVAS CONTAINER */}
+      {/* CYTOSCAPE HTML5 CANVAS CONTAINER (Preserved DOM Node) */}
       <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
       {/* TOP FLOATING BAR (Breadcrumbs & Layout Controls) */}

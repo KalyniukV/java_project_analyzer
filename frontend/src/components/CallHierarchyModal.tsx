@@ -147,113 +147,128 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
     return { cyElements: elements };
   }, [hierarchy, direction, depth]);
 
-  // Cytoscape Canvas Lifecycle
+  // Cytoscape Canvas Lifecycle (Init once when open in diagram mode)
   useEffect(() => {
-    if (!isOpen || viewMode !== 'diagram' || !containerRef.current || cyElements.length === 0) return;
+    if (!isOpen || viewMode !== 'diagram' || !containerRef.current) return;
 
-    const cy = cytoscape({
-      container: containerRef.current,
-      elements: cyElements,
-      boxSelectionEnabled: false,
-      autounselectify: false,
-      minZoom: 0.1,
-      maxZoom: 3.5,
-      wheelSensitivity: 0.25,
-      style: [
-        {
-          selector: 'node',
-          style: {
-            'shape': 'round-rectangle',
-            'width': '240px',
-            'height': '54px',
-            'background-color': '#161b22',
-            'border-width': '2px',
-            'border-color': '#30363d',
-            'corner-radius': '10px',
-            'label': 'data(label)',
-            'color': '#ffffff',
-            'font-family': 'JetBrains Mono, Fira Code, monospace',
-            'font-size': '11px',
-            'font-weight': 'bold',
-            'text-valign': 'center',
-            'text-halign': 'center',
-            'text-wrap': 'ellipsis',
-            'text-max-width': '220px',
-            'text-outline-color': '#0d1117',
-            'text-outline-width': '2px',
-          } as any,
-        },
-        // Root Target Node
-        {
-          selector: 'node[isRoot = "true"]',
-          style: {
-            'background-color': '#3b0764',
-            'border-color': '#c084fc',
-            'border-width': '3px',
-            'width': '260px',
-            'height': '60px',
-            'font-size': '12px',
-            'shadow-blur': 20,
-            'shadow-color': '#a855f7',
-            'shadow-opacity': 0.7,
-          } as any,
-        },
-        // Caller Nodes
-        {
-          selector: 'node[isCaller = "true"]',
-          style: {
-            'background-color': '#082f49',
-            'border-color': '#38bdf8',
+    if (!cyRef.current) {
+      const cy = cytoscape({
+        container: containerRef.current,
+        elements: [],
+        boxSelectionEnabled: false,
+        autounselectify: false,
+        minZoom: 0.1,
+        maxZoom: 3.5,
+        wheelSensitivity: 0.25,
+        style: [
+          {
+            selector: 'node',
+            style: {
+              'shape': 'round-rectangle',
+              'width': '240px',
+              'height': '54px',
+              'background-color': '#161b22',
+              'border-width': '2px',
+              'border-color': '#30363d',
+              'corner-radius': '10px',
+              'label': 'data(label)',
+              'color': '#ffffff',
+              'font-family': 'JetBrains Mono, Fira Code, monospace',
+              'font-size': '11px',
+              'font-weight': 'bold',
+              'text-valign': 'center',
+              'text-halign': 'center',
+              'text-wrap': 'ellipsis',
+              'text-max-width': '220px',
+              'text-outline-color': '#0d1117',
+              'text-outline-width': '2px',
+            } as any,
           },
-        },
-        // Callee Nodes
-        {
-          selector: 'node[isCaller = "false"][isRoot = "false"]',
-          style: {
-            'background-color': '#431407',
-            'border-color': '#fb923c',
+          // Root Target Node
+          {
+            selector: 'node[isRoot = "true"]',
+            style: {
+              'background-color': '#3b0764',
+              'border-color': '#c084fc',
+              'border-width': '3px',
+              'width': '260px',
+              'height': '60px',
+              'font-size': '12px',
+              'shadow-blur': 20,
+              'shadow-color': '#a855f7',
+              'shadow-opacity': 0.7,
+            } as any,
           },
-        },
-        // Edge styling
-        {
-          selector: 'edge',
-          style: {
-            'width': 2.5,
-            'line-color': '#38bdf8',
-            'curve-style': 'bezier',
-            'target-arrow-shape': 'triangle-backcurve',
-            'target-arrow-color': '#38bdf8',
-            'arrow-scale': 1.2,
-            'opacity': 0.8,
-          } as any,
-        },
-        {
-          selector: 'edge[isGwt = "true"]',
-          style: {
-            'line-color': '#d946ef',
-            'target-arrow-color': '#d946ef',
-            'width': 3,
+          // Caller Nodes
+          {
+            selector: 'node[isCaller = "true"]',
+            style: {
+              'background-color': '#082f49',
+              'border-color': '#38bdf8',
+            },
           },
-        },
-      ],
-    });
+          // Callee Nodes
+          {
+            selector: 'node[isCaller = "false"][isRoot = "false"]',
+            style: {
+              'background-color': '#431407',
+              'border-color': '#fb923c',
+            },
+          },
+          // Edge styling
+          {
+            selector: 'edge',
+            style: {
+              'width': 2.5,
+              'line-color': '#38bdf8',
+              'curve-style': 'bezier',
+              'target-arrow-shape': 'triangle-backcurve',
+              'target-arrow-color': '#38bdf8',
+              'arrow-scale': 1.2,
+              'opacity': 0.8,
+            } as any,
+          },
+          {
+            selector: 'edge[isGwt = "true"]',
+            style: {
+              'line-color': '#d946ef',
+              'target-arrow-color': '#d946ef',
+              'width': 3,
+            },
+          },
+        ],
+      });
 
-    cy.on('tap', 'node', (evt: EventObject) => {
-      const node = evt.target;
-      const id = node.id();
-      if (id !== activeTarget) {
-        setActiveTarget(id);
-      }
-    });
+      cy.on('tap', 'node', (evt: EventObject) => {
+        const node = evt.target;
+        const id = node.id();
+        if (id !== activeTarget) {
+          setActiveTarget(id);
+        }
+      });
 
-    cyRef.current = cy;
+      cyRef.current = cy;
+    }
 
-    cy.fit(undefined, 50);
+    const cy = cyRef.current;
+    if (cy && cyElements.length > 0) {
+      cy.batch(() => {
+        cy.elements().remove();
+        cy.add(cyElements);
+      });
+      cy.fit(undefined, 50);
+    }
+  }, [isOpen, viewMode, cyElements, activeTarget]);
 
-    return () => {
-      cy.destroy();
-    };
-  }, [isOpen, viewMode, cyElements]);
+  // Clean up Cytoscape on modal close
+  useEffect(() => {
+    if (!isOpen && cyRef.current) {
+      try {
+        cyRef.current.destroy();
+      } catch {}
+      cyRef.current = null;
+    }
+  }, [isOpen]);
 
   if (!isOpen || !activeTarget) return null;
 
