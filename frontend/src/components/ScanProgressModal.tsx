@@ -36,7 +36,7 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
     }
   }, [progress?.logs]);
 
-  if (!isOpen && !progress?.is_scanning) return null;
+  if (!isOpen) return null;
 
   const logs = progress?.logs || [];
   const percent = Math.min(100, Math.max(0, Math.round(progress?.percentage || 0)));

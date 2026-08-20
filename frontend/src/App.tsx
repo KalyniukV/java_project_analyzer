@@ -316,7 +316,10 @@ export function App() {
         isOpen={showProgressModal}
         progress={scanProgress}
         scanningPath={scanningPath}
-        onClose={() => setShowProgressModal(false)}
+        onClose={() => {
+          setShowProgressModal(false);
+          setScanProgress(null);
+        }}
       />
     </div>
   );

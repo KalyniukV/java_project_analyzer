@@ -300,9 +300,9 @@ impl GraphAnalyzer {
 
                 // Smart limit for massive 100k+ projects when no filter or node is selected
                 if core_ids.len() > 250 && selected_id.is_none() && !has_filter {
-                    let mut sorted_packages = self.model.packages.clone();
+                    let mut sorted_packages: Vec<&PackageInfo> = self.model.packages.iter().collect();
                     sorted_packages.sort_by(|a, b| b.class_ids.len().cmp(&a.class_ids.len()));
-                    core_ids = sorted_packages.into_iter().take(200).map(|p| p.id).collect();
+                    core_ids = sorted_packages.into_iter().take(200).map(|p| p.id.clone()).collect();
                 }
 
                 // If include_external, find neighbor packages that connect with core_ids
@@ -391,7 +391,7 @@ impl GraphAnalyzer {
 
                 // Smart limit for massive 100k+ projects when no filter or node is selected
                 if core_ids.len() > 300 && selected_id.is_none() && !has_filter {
-                    let mut sorted_classes = self.model.classes.clone();
+                    let mut sorted_classes: Vec<&ClassInfo> = self.model.classes.iter().collect();
                     sorted_classes.sort_by(|a, b| {
                         let is_key_a = a.annotations.iter().any(|an| {
                             an.contains("Controller") || an.contains("Service") || an.contains("Endpoint") || an.contains("RemoteService") || an.contains("Repository")
@@ -403,7 +403,7 @@ impl GraphAnalyzer {
                         let score_b = if is_key_b { 1000 + b.methods.len() } else { b.methods.len() };
                         score_b.cmp(&score_a)
                     });
-                    core_ids = sorted_classes.into_iter().take(250).map(|c| c.id).collect();
+                    core_ids = sorted_classes.into_iter().take(200).map(|c| c.id.clone()).collect();
                 }
 
                 // If include_external, find neighbor classes outside core_ids that connect with core_ids
