@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import cytoscape, { Core, EventObject } from 'cytoscape';
 // @ts-ignore
 import dagre from 'cytoscape-dagre';
@@ -28,6 +28,52 @@ interface CallHierarchyModalProps {
   onClose: () => void;
   targetId: string | null;
   onNavigateToClass?: (classId: string) => void;
+}
+
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function generateCallNodeSvg(
+  label: string,
+  layerTag: string,
+  subLabel: string,
+  headerBg: string,
+  borderColor: string,
+  isRoot: boolean = false
+): string {
+  const safeLabel = escapeXml(label.length > 28 ? label.substring(0, 26) + '...' : label);
+  const safeTag = escapeXml(layerTag);
+  const safeSub = escapeXml(subLabel.length > 34 ? subLabel.substring(0, 32) + '...' : subLabel);
+
+  const cardBg = isRoot ? '#201335' : '#161b22';
+  const borderWidth = isRoot ? '3' : '2';
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="260" height="74" viewBox="0 0 260 74">
+    <!-- Card Container -->
+    <rect x="1.5" y="1.5" width="257" height="71" rx="8" ry="8" fill="${cardBg}" stroke="${borderColor}" stroke-width="${borderWidth}" />
+    
+    <!-- Top Header Bar -->
+    <path d="M 1.5 8.5 Q 1.5 1.5 8.5 1.5 L 251.5 1.5 Q 258.5 1.5 258.5 8.5 L 258.5 22.5 L 1.5 22.5 Z" fill="${headerBg}" />
+    <text x="10" y="15.5" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9" font-weight="800" letter-spacing="0.5">${safeTag}</text>
+    
+    <!-- Left & Right Port Handles (Horizontal Flow) -->
+    <circle cx="1.5" cy="37" r="3" fill="#38bdf8" stroke="#0d1117" stroke-width="1.5" />
+    <circle cx="258.5" cy="37" r="3" fill="#38bdf8" stroke="#0d1117" stroke-width="1.5" />
+    
+    <!-- Method Name -->
+    <text x="10" y="41" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'JetBrains Mono', sans-serif" font-size="12" font-weight="700">${safeLabel}</text>
+    
+    <!-- Declaring Class Sublabel -->
+    <text x="10" y="58" fill="#93c5fd" font-family="'JetBrains Mono', monospace" font-size="9.5" font-weight="500">${safeSub}</text>
+  </svg>`;
+
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
 }
 
 export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
@@ -78,7 +124,7 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
   const callers = hierarchy?.nodes.filter((n) => n.depth < 0).sort((a, b) => b.depth - a.depth) || [];
   const callees = hierarchy?.nodes.filter((n) => n.depth > 0).sort((a, b) => a.depth - b.depth) || [];
 
-  // Filtered elements for Cytoscape
+  // Filtered elements for Cytoscape with ReactFlow styled SVG cards
   const { cyElements } = useMemo(() => {
     if (!hierarchy || hierarchy.nodes.length === 0) return { cyElements: [] };
 
@@ -93,41 +139,36 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
 
     const elements: cytoscape.ElementDefinition[] = [];
 
-    // Group nodes by depth to assign distinct positions
-    const nodesByDepth: Record<number, CallHierarchyNode[]> = {};
     for (const node of filteredNodes) {
-      if (!nodesByDepth[node.depth]) nodesByDepth[node.depth] = [];
-      nodesByDepth[node.depth].push(node);
-    }
-
-    const X_SPACING = 320;
-    const Y_SPACING = 90;
-
-    for (const node of filteredNodes) {
-      const depthGroup = nodesByDepth[node.depth] || [];
-      const index = depthGroup.findIndex((n) => n.id === node.id);
-      const total = depthGroup.length;
-
-      const posX = (node.depth + depth) * X_SPACING;
-      const posY = (index - (total - 1) / 2) * Y_SPACING;
-
       const isRoot = node.depth === 0;
       const isCaller = node.depth < 0;
+
+      let layerTag = isRoot
+        ? '🎯 TARGET METHOD'
+        : isCaller
+        ? `⬅ CALLER (Step ${node.depth})`
+        : `➡ CALLEE (Step +${node.depth})`;
+
+      let headerBg = isRoot ? '#6b21a8' : isCaller ? '#0369a1' : '#c2410c';
+      let borderColor = isRoot ? '#c084fc' : isCaller ? '#38bdf8' : '#fb923c';
+
       const shortClass = node.class_simple_name || node.declaring_class.split('.').pop() || node.declaring_class;
-      const label = `${shortClass}.${node.name}()`;
+      const methodName = `${node.name}()`;
+
+      const svgCard = generateCallNodeSvg(methodName, layerTag, shortClass, headerBg, borderColor, isRoot);
 
       elements.push({
         group: 'nodes',
         data: {
           id: node.id,
-          label: label,
+          label: methodName,
+          svgCard: svgCard,
           depth: node.depth,
           isRoot: isRoot ? 'true' : 'false',
           isCaller: isCaller ? 'true' : 'false',
           declaringClass: node.declaring_class,
           methodName: node.name,
         },
-        position: { x: posX, y: posY },
       });
     }
 
@@ -145,11 +186,31 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
     }
 
     return { cyElements: elements };
-  }, [hierarchy, direction, depth]);
+  }, [hierarchy, direction]);
 
-  // Cytoscape Canvas Lifecycle (Init once when open in diagram mode)
+  const runHierarchyLayout = useCallback((cy: Core) => {
+    try {
+      const l = cy.layout({
+        name: 'dagre',
+        rankDir: 'LR', // Horizontal flow: Callers (Left) -> Root (Center) -> Callees (Right)
+        nodeSep: 40,
+        rankSep: 90,
+        edgeSep: 25,
+        animate: true,
+        animationDuration: 300,
+        fit: true,
+        padding: 50,
+      } as any);
+      l.run();
+    } catch {
+      const fallback = cy.layout({ name: 'grid', fit: true, padding: 50 });
+      fallback.run();
+    }
+  }, []);
+
+  // Cytoscape Canvas Lifecycle
   useEffect(() => {
-    if (!isOpen || viewMode !== 'diagram' || !containerRef.current) return;
+    if (!isOpen || !containerRef.current) return;
 
     if (!cyRef.current) {
       const cy = cytoscape({
@@ -164,56 +225,24 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
           {
             selector: 'node',
             style: {
-              'shape': 'round-rectangle',
-              'width': '240px',
-              'height': '54px',
-              'background-color': '#161b22',
-              'border-width': '2px',
-              'border-color': '#30363d',
-              'corner-radius': '10px',
-              'label': 'data(label)',
-              'color': '#ffffff',
-              'font-family': 'JetBrains Mono, Fira Code, monospace',
-              'font-size': '11px',
-              'font-weight': 'bold',
-              'text-valign': 'center',
-              'text-halign': 'center',
-              'text-wrap': 'ellipsis',
-              'text-max-width': '220px',
-              'text-outline-color': '#0d1117',
-              'text-outline-width': '2px',
+              'shape': 'rectangle',
+              'width': '260px',
+              'height': '74px',
+              'background-image': 'data(svgCard)',
+              'background-fit': 'cover',
+              'background-opacity': 0,
+              'border-width': 0,
+              'label': '',
             } as any,
           },
-          // Root Target Node
           {
             selector: 'node[isRoot = "true"]',
             style: {
-              'background-color': '#3b0764',
-              'border-color': '#c084fc',
-              'border-width': '3px',
-              'width': '260px',
-              'height': '60px',
-              'font-size': '12px',
-              'shadow-blur': 20,
+              'shadow-blur': 25,
               'shadow-color': '#a855f7',
-              'shadow-opacity': 0.7,
+              'shadow-opacity': 0.9,
+              'z-index': 999,
             } as any,
-          },
-          // Caller Nodes
-          {
-            selector: 'node[isCaller = "true"]',
-            style: {
-              'background-color': '#082f49',
-              'border-color': '#38bdf8',
-            },
-          },
-          // Callee Nodes
-          {
-            selector: 'node[isCaller = "false"][isRoot = "false"]',
-            style: {
-              'background-color': '#431407',
-              'border-color': '#fb923c',
-            },
           },
           // Edge styling
           {
@@ -222,9 +251,9 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
               'width': 2.5,
               'line-color': '#38bdf8',
               'curve-style': 'bezier',
-              'target-arrow-shape': 'triangle-backcurve',
+              'target-arrow-shape': 'triangle',
               'target-arrow-color': '#38bdf8',
-              'arrow-scale': 1.2,
+              'arrow-scale': 1.1,
               'opacity': 0.8,
             } as any,
           },
@@ -256,9 +285,9 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
         cy.elements().remove();
         cy.add(cyElements);
       });
-      cy.fit(undefined, 50);
+      runHierarchyLayout(cy);
     }
-  }, [isOpen, viewMode, cyElements, activeTarget]);
+  }, [isOpen, cyElements, activeTarget, runHierarchyLayout]);
 
   // Clean up Cytoscape on modal close
   useEffect(() => {
@@ -453,44 +482,59 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
 
         {/* Modal Body */}
         <div className="flex-1 w-full h-full relative overflow-hidden bg-[#0d1117]">
-          {isLoading ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 font-mono text-xs">
+          {/* Loading Overlay */}
+          {isLoading && (
+            <div className="absolute inset-0 z-30 bg-[#0d1117]/80 backdrop-blur-sm flex flex-col items-center justify-center text-slate-300 font-mono text-xs">
               <div className="w-8 h-8 border-2 border-purple-400 border-t-transparent rounded-full animate-spin mb-3"></div>
-              Побудова графа викликів (Depth {depth})...
+              <span>Побудова графа викликів (Depth {depth})...</span>
             </div>
-          ) : viewMode === 'diagram' ? (
-            <div className="w-full h-full relative">
-              {/* Cytoscape Canvas */}
-              <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+          )}
 
-              {/* Floating Canvas Zoom/Fit Controls */}
-              <div className="absolute bottom-4 left-4 flex items-center gap-1.5 bg-[#161b22]/95 border border-[#30363d] p-1.5 rounded-xl shadow-2xl backdrop-blur-md z-20">
-                <button
-                  onClick={handleZoomIn}
-                  className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition"
-                  title="Наблизити"
-                >
-                  <ZoomIn className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={handleZoomOut}
-                  className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition"
-                  title="Віддалити"
-                >
-                  <ZoomOut className="w-4 h-4" />
-                </button>
-                <div className="w-px h-4 bg-[#30363d] mx-0.5" />
-                <button
-                  onClick={handleFit}
-                  className="p-1.5 hover:bg-white/10 rounded-lg text-sky-400 hover:text-sky-300 transition"
-                  title="Вмістити на екрані"
-                >
-                  <Maximize2 className="w-4 h-4" />
-                </button>
-              </div>
+          {/* Diagram Canvas (Always mounted in DOM to prevent ref null) */}
+          <div
+            className={`w-full h-full relative ${
+              viewMode === 'diagram' ? 'block' : 'hidden'
+            }`}
+          >
+            <div
+              ref={containerRef}
+              className="w-full h-full cursor-grab active:cursor-grabbing"
+              style={{
+                backgroundColor: '#0d1117',
+                backgroundImage: 'radial-gradient(rgba(255, 255, 255, 0.12) 1.2px, transparent 1.2px)',
+                backgroundSize: '20px 20px',
+              }}
+            />
+
+            {/* Floating Canvas Zoom/Fit Controls */}
+            <div className="absolute bottom-4 left-4 flex items-center gap-1.5 bg-[#161b22]/95 border border-[#30363d] p-1.5 rounded-xl shadow-2xl backdrop-blur-md z-20">
+              <button
+                onClick={handleZoomIn}
+                className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition"
+                title="Наблизити"
+              >
+                <ZoomIn className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleZoomOut}
+                className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition"
+                title="Віддалити"
+              >
+                <ZoomOut className="w-4 h-4" />
+              </button>
+              <div className="w-px h-4 bg-[#30363d] mx-0.5" />
+              <button
+                onClick={handleFit}
+                className="p-1.5 hover:bg-white/10 rounded-lg text-sky-400 hover:text-sky-300 transition"
+                title="Вмістити на екрані"
+              >
+                <Maximize2 className="w-4 h-4" />
+              </button>
             </div>
-          ) : (
-            /* 3-Column Structured View */
+          </div>
+
+          {/* 3-Column Structured View */}
+          {viewMode === 'columns' && (
             <div className="p-5 h-full overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
                 {/* Inbound Callers */}
