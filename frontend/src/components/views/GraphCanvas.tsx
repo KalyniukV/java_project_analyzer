@@ -60,6 +60,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<Core | null>(null);
+  const lastActiveViewRef = useRef<string>(activeView);
+  const positionsCacheRef = useRef<Map<string, cytoscape.Position>>(new Map());
 
   const [layoutMode, setLayoutMode] = useState<'dagre' | 'fcose' | 'grid' | 'concentric'>('dagre');
   const [hideDTOs, setHideDTOs] = useState<boolean>(false);
@@ -86,7 +88,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   }, [graphData, hideDTOs]);
 
   // -------------------------------------------------------------
-  // Run layout algorithm (only on initial load or layout switch)
+  // Run layout algorithm (only when view changes or user switches layout)
   // -------------------------------------------------------------
   const runLayout = (cy: Core, mode: string) => {
     let layoutOptions: any;
@@ -143,10 +145,23 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   };
 
   // -------------------------------------------------------------
-  // Initialize Cytoscape instance on structure change
+  // Initialize or incrementally update Cytoscape instance
   // -------------------------------------------------------------
   useEffect(() => {
     if (!containerRef.current) return;
+
+    // Cache current node positions before any update
+    if (cyRef.current) {
+      cyRef.current.nodes().forEach((n) => {
+        positionsCacheRef.current.set(n.id(), { ...n.position() });
+      });
+    }
+
+    const isViewChanged = lastActiveViewRef.current !== activeView;
+    lastActiveViewRef.current = activeView;
+    if (isViewChanged) {
+      positionsCacheRef.current.clear();
+    }
 
     // Transform to Cytoscape elements
     const elements: cytoscape.ElementDefinition[] = [];
@@ -158,6 +173,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       const isInterface = category === 'interface';
       const isModule = node.category === 'module' || activeView === 'modules';
       const isPackage = node.category === 'package' || activeView === 'packages';
+      const isExternalNode = node.is_external === true;
 
       // Build Rich Multiline Label
       let layerTag = 'CLASS';
@@ -179,6 +195,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       lines.push(`⬇ ${node.degree_in || 0} in  •  ⬆ ${node.degree_out || 0} out`);
 
       const displayLabel = lines.join('\n');
+      const cachedPos = positionsCacheRef.current.get(node.id);
 
       elements.push({
         group: 'nodes',
@@ -193,7 +210,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           isInterface: isInterface ? 'true' : 'false',
           isModule: isModule ? 'true' : 'false',
           isPackage: isPackage ? 'true' : 'false',
+          isExternal: isExternalNode ? 'true' : 'false',
         },
+        position: cachedPos ? { x: cachedPos.x, y: cachedPos.y } : undefined,
       });
     }
 
@@ -302,6 +321,14 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             'width': '270px',
             'height': '72px',
             'font-size': '12px',
+          },
+        },
+        // External Boundary Nodes
+        {
+          selector: 'node[isExternal = "true"]',
+          style: {
+            'border-style': 'dashed',
+            'border-width': '2px',
           },
         },
         // SELECTED NODE STYLING
@@ -466,9 +493,19 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     cyRef.current = cy;
 
-    runLayout(cy, layoutMode);
+    // Only run layout if positions were not cached (e.g. on view change or first render)
+    const hasUnpositionedNodes = elements.some((e) => e.group === 'nodes' && !e.position);
+    if (isViewChanged || hasUnpositionedNodes || positionsCacheRef.current.size === 0) {
+      runLayout(cy, layoutMode);
+    }
 
     return () => {
+      // Save positions before cleanup
+      if (cyRef.current) {
+        cyRef.current.nodes().forEach((n) => {
+          positionsCacheRef.current.set(n.id(), { ...n.position() });
+        });
+      }
       cy.destroy();
     };
   }, [filteredNodes, filteredEdges, activeView]);
@@ -515,6 +552,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   // Switch layout mode explicitly
   const handleLayoutChange = (mode: 'dagre' | 'fcose' | 'grid' | 'concentric') => {
     setLayoutMode(mode);
+    positionsCacheRef.current.clear();
     if (cyRef.current) {
       runLayout(cyRef.current, mode);
     }
