@@ -64,6 +64,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
     return saved ? parseInt(saved, 10) : 320;
   });
   const [isResizing, setIsResizing] = useState(false);
+  const [detailClassInfo, setDetailClassInfo] = useState<ClassInfo | null>(null);
 
   const startResizing = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -94,6 +95,24 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
     };
   }, [isResizing]);
 
+  // Find node in graphData
+  const activeNode = graphData?.nodes.find((n) => n.id === selectedNodeId);
+  const baseClassInfo = project?.classes.find((c) => c.id === selectedNodeId);
+  const pkgInfo = project?.packages.find((p) => p.id === selectedNodeId);
+  const moduleInfo = project?.modules.find((m) => m.id === selectedNodeId);
+
+  useEffect(() => {
+    if (selectedNodeId && activeNode?.category !== 'package' && activeNode?.category !== 'module') {
+      getClassDetail(selectedNodeId)
+        .then((detail) => setDetailClassInfo(detail))
+        .catch(() => setDetailClassInfo(null));
+    } else {
+      setDetailClassInfo(null);
+    }
+  }, [selectedNodeId, activeNode?.category]);
+
+  const classInfo = detailClassInfo || baseClassInfo;
+
   if (!selectedNodeId) {
     return (
       <div
@@ -116,26 +135,6 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
       </div>
     );
   }
-
-  const [detailClassInfo, setDetailClassInfo] = useState<ClassInfo | null>(null);
-
-  // Find node in graphData
-  const activeNode = graphData?.nodes.find((n) => n.id === selectedNodeId);
-  const baseClassInfo = project?.classes.find((c) => c.id === selectedNodeId);
-  const pkgInfo = project?.packages.find((p) => p.id === selectedNodeId);
-  const moduleInfo = project?.modules.find((m) => m.id === selectedNodeId);
-
-  useEffect(() => {
-    if (selectedNodeId && activeNode?.category !== 'package' && activeNode?.category !== 'module') {
-      getClassDetail(selectedNodeId)
-        .then((detail) => setDetailClassInfo(detail))
-        .catch(() => setDetailClassInfo(null));
-    } else {
-      setDetailClassInfo(null);
-    }
-  }, [selectedNodeId, activeNode?.category]);
-
-  const classInfo = detailClassInfo || baseClassInfo;
 
   // Inbound & Outbound edges
   const inboundEdges = graphData?.edges.filter((e) => e.target === selectedNodeId) || [];
