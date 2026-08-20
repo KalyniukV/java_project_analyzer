@@ -15,8 +15,22 @@ import {
   ClassInfo,
 } from '../types';
 
+async function invokeWithLog<T>(cmd: string, args?: Record<string, any>): Promise<T> {
+  const t0 = performance.now();
+  try {
+    const res = await invoke<T>(cmd, args);
+    const ms = (performance.now() - t0).toFixed(1);
+    console.debug(`%c[JavaLens IPC] %c${cmd} %c(${ms}ms)`, 'color: #38bdf8; font-weight: bold', 'color: #a855f7', 'color: #34d399', args || {});
+    return res;
+  } catch (err) {
+    const ms = (performance.now() - t0).toFixed(1);
+    console.error(`%c[JavaLens IPC ERROR] %c${cmd} %c(${ms}ms)`, 'color: #f43f5e; font-weight: bold', 'color: #fb923c', 'color: #94a3b8', err);
+    throw err;
+  }
+}
+
 export async function scanProject(path: string): Promise<ScanResponse> {
-  return invoke<ScanResponse>('scan_project', { path });
+  return invokeWithLog<ScanResponse>('scan_project', { path });
 }
 
 export async function getScanProgress(): Promise<ScanProgress> {
@@ -24,7 +38,7 @@ export async function getScanProgress(): Promise<ScanProgress> {
 }
 
 export async function getProject(): Promise<ProjectModel> {
-  return invoke<ProjectModel>('get_project');
+  return invokeWithLog<ProjectModel>('get_project');
 }
 
 export async function getGraph(
@@ -36,7 +50,7 @@ export async function getGraph(
   packages?: string[],
   includeExternal: boolean = false
 ): Promise<VisualGraphPayload> {
-  return invoke<VisualGraphPayload>('get_graph', {
+  return invokeWithLog<VisualGraphPayload>('get_graph', {
     view,
     selectedId: selectedId || null,
     depth,
@@ -48,35 +62,35 @@ export async function getGraph(
 }
 
 export async function getCycles(view: 'modules' | 'packages' | 'classes'): Promise<CycleInfo[]> {
-  return invoke<CycleInfo[]>('get_cycles', { view });
+  return invokeWithLog<CycleInfo[]>('get_cycles', { view });
 }
 
 export async function getClassDetail(target: string): Promise<ClassInfo | null> {
-  return invoke<ClassInfo | null>('get_class_detail', { target });
+  return invokeWithLog<ClassInfo | null>('get_class_detail', { target });
 }
 
 export async function listStoredProjects(): Promise<ProjectModel[]> {
-  return invoke<ProjectModel[]>('list_stored_projects');
+  return invokeWithLog<ProjectModel[]>('list_stored_projects');
 }
 
 export async function loadStoredProject(rootPath: string): Promise<ProjectModel> {
-  return invoke<ProjectModel>('load_stored_project', { rootPath });
+  return invokeWithLog<ProjectModel>('load_stored_project', { rootPath });
 }
 
 export async function deleteStoredProject(rootPath: string): Promise<boolean> {
-  return invoke<boolean>('delete_stored_project', { rootPath });
+  return invokeWithLog<boolean>('delete_stored_project', { rootPath });
 }
 
 export async function pickFolderNative(): Promise<string | null> {
-  return invoke<string | null>('pick_folder');
+  return invokeWithLog<string | null>('pick_folder');
 }
 
 export async function browseDirectories(path?: string): Promise<BrowseDirResponse> {
-  return invoke<BrowseDirResponse>('browse_dirs', { path: path || null });
+  return invokeWithLog<BrowseDirResponse>('browse_dirs', { path: path || null });
 }
 
 export async function openFile(path: string, line?: number): Promise<boolean> {
-  return invoke<boolean>('open_file', { path, line: line || null });
+  return invokeWithLog<boolean>('open_file', { path, line: line || null });
 }
 
 // -------------------------------------------------------------
@@ -84,25 +98,25 @@ export async function openFile(path: string, line?: number): Promise<boolean> {
 // -------------------------------------------------------------
 
 export async function getImpactAnalysis(targetId?: string): Promise<ImpactAnalysis> {
-  return invoke<ImpactAnalysis>('get_impact_analysis', { target: targetId || null });
+  return invokeWithLog<ImpactAnalysis>('get_impact_analysis', { target: targetId || null });
 }
 
 export async function getArchitectureDrift(): Promise<ArchitectureViolation[]> {
-  return invoke<ArchitectureViolation[]>('get_architecture_drift');
+  return invokeWithLog<ArchitectureViolation[]>('get_architecture_drift');
 }
 
 export async function getMicroserviceExtraction(targetId?: string): Promise<MicroserviceExtractionAnalysis> {
-  return invoke<MicroserviceExtractionAnalysis>('get_microservice_extraction', { target: targetId || null });
+  return invokeWithLog<MicroserviceExtractionAnalysis>('get_microservice_extraction', { target: targetId || null });
 }
 
 export async function getArchitectureHealth(): Promise<ArchitectureHealth> {
-  return invoke<ArchitectureHealth>('get_architecture_health');
+  return invokeWithLog<ArchitectureHealth>('get_architecture_health');
 }
 
 export async function getArchitectureSnapshot(): Promise<ArchitectureSnapshot> {
-  return invoke<ArchitectureSnapshot>('get_architecture_snapshot');
+  return invokeWithLog<ArchitectureSnapshot>('get_architecture_snapshot');
 }
 
 export async function getCallHierarchy(target: string, depth: number = 2): Promise<CallHierarchyGraph> {
-  return invoke<CallHierarchyGraph>('get_call_hierarchy', { target, depth });
+  return invokeWithLog<CallHierarchyGraph>('get_call_hierarchy', { target, depth });
 }

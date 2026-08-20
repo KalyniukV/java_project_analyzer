@@ -1,13 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { ScanProgress } from '../types';
 import {
   Activity,
   CheckCircle,
   Copy,
   Cpu,
+  Download,
   FileCode,
   Layers,
   Link2,
+  Search,
   Terminal,
   X,
   Zap,
@@ -28,13 +30,16 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
 }) => {
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [logSearch, setLogSearch] = useState('');
+  const [logFilterType, setLogFilterType] = useState<'all' | 'stages' | 'errors' | 'perf'>('all');
+  const [autoScroll, setAutoScroll] = useState(true);
 
-  // Auto-scroll logs to bottom
+  // Auto-scroll logs to bottom if enabled
   useEffect(() => {
-    if (terminalEndRef.current) {
+    if (autoScroll && terminalEndRef.current) {
       terminalEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [progress?.logs]);
+  }, [progress?.logs, autoScroll]);
 
   if (!isOpen) return null;
 
@@ -49,6 +54,34 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleDownloadLogs = () => {
+    const blob = new Blob([logs.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `javalens-scan-log-${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // Filter logs based on search and category
+  const filteredLogs = useMemo(() => {
+    let list = logs;
+    if (logFilterType === 'errors') {
+      list = list.filter((l) => l.includes('[ERROR]') || l.includes('❌') || l.includes('[WARN]'));
+    } else if (logFilterType === 'stages') {
+      list = list.filter((l) => l.includes('[Етап') || l.includes('🚀') || l.includes('✅'));
+    } else if (logFilterType === 'perf') {
+      list = list.filter((l) => l.includes('файлів/сек') || l.includes('мс') || l.includes('⚡') || l.includes('час:'));
+    }
+
+    if (!logSearch.trim()) return list;
+    const term = logSearch.trim().toLowerCase();
+    return list.filter((l) => l.toLowerCase().includes(term));
+  }, [logs, logFilterType, logSearch]);
+
   const stages = [
     { num: 1, name: 'Модулі & Файли', icon: Layers },
     { num: 2, name: 'AST Парсинг (Rayon)', icon: Cpu },
@@ -58,7 +91,7 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4 animate-fade-in">
-      <div className="w-full max-w-4xl bg-[#0d1117] border border-[#30363d] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="w-full max-w-4xl bg-[#0d1117] border border-[#30363d] rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-[#30363d] bg-[#161b22]/70">
           <div className="flex items-center gap-3">
@@ -69,7 +102,7 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
               <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
                 {isDone ? '✅ Сканування завершено успішно' : hasError ? '❌ Помилка сканування' : '🚀 Сканування проєкту (100k+ класів)'}
                 <span className="text-xs font-mono font-normal px-2 py-0.5 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20">
-                  Rayon Engine
+                  Rayon Parallel Engine
                 </span>
               </h2>
               <p className="text-xs text-slate-400 font-mono truncate max-w-lg">
@@ -111,7 +144,7 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
           </div>
         </div>
 
-        <div className="p-6 space-y-6 overflow-y-auto">
+        <div className="p-6 space-y-5 overflow-y-auto">
           {/* Error Banner */}
           {hasError && (
             <div className="p-4 rounded-xl bg-rose-950/60 border border-rose-500/50 text-rose-200 text-xs flex items-center justify-between gap-3">
@@ -134,7 +167,6 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
               const currentStage = progress?.stage_index || 1;
               const isPassed = isDone || currentStage > st.num;
               const isCurrent = !isDone && currentStage === st.num;
-              const Icon = st.icon;
 
               return (
                 <div
@@ -254,38 +286,105 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
             </div>
           </div>
 
-          {/* Terminal Console Logs */}
+          {/* High-Resolution Terminal Console Logs with Filters & Search */}
           <div className="rounded-xl border border-[#30363d] bg-black/90 overflow-hidden shadow-inner flex flex-col">
-            <div className="flex items-center justify-between px-3 py-2 bg-[#161b22] border-b border-[#30363d] text-xs text-slate-400">
+            {/* Terminal Header & Toolbar */}
+            <div className="flex flex-wrap items-center justify-between px-3 py-2 bg-[#161b22] border-b border-[#30363d] text-xs text-slate-400 gap-2">
               <div className="flex items-center gap-2 font-mono">
                 <Terminal className="w-3.5 h-3.5 text-sky-400" />
-                <span>Термінал сканування (Live Console Logs)</span>
-                <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">
-                  {logs.length} рядків
+                <span className="font-semibold text-slate-200">Лог Сканування (Live Engine Logs)</span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                  {filteredLogs.length}/{logs.length} рядків
                 </span>
               </div>
-              <button
-                onClick={handleCopyLogs}
-                className="flex items-center gap-1 text-[10px] font-mono hover:text-slate-200 transition px-2 py-0.5 rounded hover:bg-slate-800"
-              >
-                <Copy className="w-3 h-3" />
-                <span>{copied ? 'Скопійовано!' : 'Копіювати логи'}</span>
-              </button>
+
+              {/* Log Filters & Search */}
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search className="w-3 h-3 absolute left-2 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input
+                    type="text"
+                    placeholder="Пошук у логах..."
+                    value={logSearch}
+                    onChange={(e) => setLogSearch(e.target.value)}
+                    className="bg-[#0d1117] border border-[#30363d] rounded pl-6 pr-2 py-0.5 text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono"
+                  />
+                </div>
+
+                <div className="flex items-center bg-[#0d1117] border border-[#30363d] rounded p-0.5 text-[10px] font-mono">
+                  <button
+                    onClick={() => setLogFilterType('all')}
+                    className={`px-1.5 py-0.5 rounded ${logFilterType === 'all' ? 'bg-sky-500/20 text-sky-300' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    Всі
+                  </button>
+                  <button
+                    onClick={() => setLogFilterType('stages')}
+                    className={`px-1.5 py-0.5 rounded ${logFilterType === 'stages' ? 'bg-purple-500/20 text-purple-300' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    Етапи
+                  </button>
+                  <button
+                    onClick={() => setLogFilterType('perf')}
+                    className={`px-1.5 py-0.5 rounded ${logFilterType === 'perf' ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    Швидкість
+                  </button>
+                  <button
+                    onClick={() => setLogFilterType('errors')}
+                    className={`px-1.5 py-0.5 rounded ${logFilterType === 'errors' ? 'bg-rose-500/20 text-rose-300' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    Помилки
+                  </button>
+                </div>
+
+                <label className="flex items-center gap-1 text-[10px] text-slate-400 cursor-pointer font-mono select-none">
+                  <input
+                    type="checkbox"
+                    checked={autoScroll}
+                    onChange={(e) => setAutoScroll(e.target.checked)}
+                    className="rounded border-[#30363d] bg-[#0d1117] text-sky-500 w-3 h-3"
+                  />
+                  <span>Автопрокрутка</span>
+                </label>
+
+                <button
+                  onClick={handleCopyLogs}
+                  className="flex items-center gap-1 text-[10px] font-mono text-slate-300 hover:text-white transition px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700"
+                  title="Скопіювати всі логи в буфер"
+                >
+                  <Copy className="w-3 h-3" />
+                  <span>{copied ? 'Скопійовано!' : 'Копіювати'}</span>
+                </button>
+
+                <button
+                  onClick={handleDownloadLogs}
+                  className="flex items-center gap-1 text-[10px] font-mono text-slate-300 hover:text-white transition px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700"
+                  title="Завантажити логи як .txt файл"
+                >
+                  <Download className="w-3 h-3" />
+                  <span>Експорт</span>
+                </button>
+              </div>
             </div>
 
-            <div className="p-3 font-mono text-xs text-slate-300 max-h-52 overflow-y-auto space-y-1 select-text">
-              {logs.length === 0 ? (
-                <div className="text-slate-500 italic">Очікування повідомлень від рушія сканування...</div>
+            {/* Log Output Console */}
+            <div className="p-3 font-mono text-xs text-slate-300 max-h-60 overflow-y-auto space-y-1 select-text">
+              {filteredLogs.length === 0 ? (
+                <div className="text-slate-500 italic">
+                  {logs.length === 0 ? 'Очікування повідомлень від рушія сканування...' : 'Немає записів за вказаним фільтром'}
+                </div>
               ) : (
-                logs.map((line, idx) => {
+                filteredLogs.map((line, idx) => {
                   let color = 'text-slate-300';
-                  if (line.includes('[ERROR]')) color = 'text-rose-400 font-bold';
+                  if (line.includes('[ERROR]') || line.includes('❌')) color = 'text-rose-400 font-bold';
+                  else if (line.includes('[WARN]') || line.includes('⚠️')) color = 'text-amber-400';
                   else if (line.includes('✅') || line.includes('[SUCCESS]')) color = 'text-emerald-300 font-semibold';
                   else if (line.includes('⚡') || line.includes('📦') || line.includes('🔗') || line.includes('[Етап')) color = 'text-sky-300';
-                  else if (line.includes('🚀')) color = 'text-fuchsia-300';
+                  else if (line.includes('🚀')) color = 'text-fuchsia-300 font-semibold';
 
                   return (
-                    <div key={idx} className={`${color} leading-relaxed break-words`}>
+                    <div key={idx} className={`${color} leading-relaxed break-words hover:bg-white/5 px-1 py-0.5 rounded`}>
                       {line}
                     </div>
                   );

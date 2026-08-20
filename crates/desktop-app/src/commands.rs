@@ -50,9 +50,13 @@ pub async fn scan_project(
     state: tauri::State<'_, AppState>,
     path: String,
 ) -> Result<ScanResponse, String> {
+    let start = std::time::Instant::now();
+    println!("\n[IPC] 🔍 Запит scan_project(path='{}')...", path);
     let path_buf = PathBuf::from(&path);
     if !path_buf.exists() {
-        return Err(format!("Path does not exist: {}", path));
+        let err = format!("Path does not exist: {}", path);
+        eprintln!("[IPC] ❌ Помилка: {}", err);
+        return Err(err);
     }
 
     let progress_ref = state.scan_progress.clone();
@@ -72,7 +76,9 @@ pub async fn scan_project(
 
             // Store in embedded NoSQL DB
             if let Err(e) = state.storage.save_project(&model) {
-                tracing::error!("Failed to store project in NoSQL DB: {}", e);
+                eprintln!("[IPC] ⚠️ Failed to store project in NoSQL DB: {}", e);
+            } else {
+                println!("[IPC] 💾 Проєкт успішно збережено у вбудовану NoSQL DB (redb).");
             }
 
             let analyzer = GraphAnalyzer::new(model);
@@ -85,6 +91,8 @@ pub async fn scan_project(
             p_lock.percentage = 100.0;
             p_lock.stage = "Сканування завершено".to_string();
 
+            println!("[IPC] ✅ scan_project завершено за {}мс (всього: {}мс)\n", scan_time_ms, start.elapsed().as_millis());
+
             Ok(ScanResponse {
                 status: "success".to_string(),
                 project_name,
@@ -93,6 +101,7 @@ pub async fn scan_project(
             })
         }
         Err(e) => {
+            eprintln!("[IPC] ❌ Помилка під час scan_project: {}", e);
             let mut p_lock = state.scan_progress.write().await;
             p_lock.is_scanning = false;
             p_lock.error = Some(e.to_string());
@@ -110,10 +119,11 @@ pub async fn get_scan_progress(state: tauri::State<'_, AppState>) -> Result<Scan
 
 #[tauri::command]
 pub async fn get_project(state: tauri::State<'_, AppState>) -> Result<ProjectModel, String> {
+    let start = std::time::Instant::now();
     let lock = state.current_analyzer.read().await;
     if let Some(analyzer) = &*lock {
         let is_large_project = analyzer.model.classes.len() > 300;
-        if is_large_project {
+        let res = if is_large_project {
             // High-performance streaming: send lightweight class descriptors and omit raw relationships
             let lightweight_classes: Vec<ClassInfo> = analyzer
                 .model
@@ -149,11 +159,22 @@ pub async fn get_project(state: tauri::State<'_, AppState>) -> Result<ProjectMod
                 relationships: Vec::new(),
             };
 
-            Ok(summary_model)
+            summary_model
         } else {
-            Ok(analyzer.model.clone())
-        }
+            analyzer.model.clone()
+        };
+
+        println!(
+            "[IPC] 📦 get_project() -> {} класів, {} пакетів, {} модулів (підготовка зайняла {}мс)",
+            res.classes.len(),
+            res.packages.len(),
+            res.modules.len(),
+            start.elapsed().as_millis()
+        );
+
+        Ok(res)
     } else {
+        eprintln!("[IPC] ⚠️ get_project() викликано, але жоден проєкт не завантажено.");
         Err("No project loaded".to_string())
     }
 }
@@ -169,6 +190,7 @@ pub async fn get_graph(
     packages: Option<Vec<String>>,
     include_external: Option<bool>,
 ) -> Result<VisualGraphPayload, String> {
+    let start = std::time::Instant::now();
     let lock = state.current_analyzer.read().await;
     if let Some(analyzer) = &*lock {
         let d = depth.unwrap_or(1);
@@ -184,8 +206,21 @@ pub async fn get_graph(
             packages.as_deref(),
             ext,
         );
+
+        println!(
+            "[IPC] 📊 get_graph(view='{}', selected='{:?}', depth={}, isolate={}) -> {} вузлів, {} зв'язків (розрахунок: {}мс)",
+            view,
+            selected_id,
+            d,
+            iso,
+            graph.nodes.len(),
+            graph.edges.len(),
+            start.elapsed().as_millis()
+        );
+
         Ok(graph)
     } else {
+        eprintln!("[IPC] ⚠️ get_graph() викликано, але проєкт не завантажено.");
         Err("No project loaded".to_string())
     }
 }
@@ -199,8 +234,10 @@ pub async fn get_class_detail(
     if let Some(analyzer) = &*lock {
         let t = target.unwrap_or_default();
         if let Some(cls) = analyzer.model.classes.iter().find(|c| c.id == t) {
+            println!("[IPC] 🔍 get_class_detail(target='{}') -> знайдено ({} полів, {} методів)", t, cls.fields.len(), cls.methods.len());
             Ok(cls.clone())
         } else {
+            eprintln!("[IPC] ❌ get_class_detail: клас '{}' не знайдено", t);
             Err("Class not found".to_string())
         }
     } else {
@@ -213,10 +250,13 @@ pub async fn get_cycles(
     state: tauri::State<'_, AppState>,
     view: Option<String>,
 ) -> Result<Vec<CycleInfo>, String> {
+    let start = std::time::Instant::now();
     let lock = state.current_analyzer.read().await;
     if let Some(analyzer) = &*lock {
         let v = view.unwrap_or_else(|| "classes".to_string());
-        Ok(analyzer.find_cycles(&v))
+        let cycles = analyzer.find_cycles(&v);
+        println!("[IPC] 🔄 get_cycles(view='{}') -> знайдено {} циклів (розрахунок: {}мс)", v, cycles.len(), start.elapsed().as_millis());
+        Ok(cycles)
     } else {
         Err("No project loaded".to_string())
     }

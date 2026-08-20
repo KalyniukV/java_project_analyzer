@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 use rayon::prelude::*;
 use walkdir::WalkDir;
@@ -115,7 +115,7 @@ impl NativeJavaScanner {
             logs.push(line);
         };
 
-        add_log(&mut progress_logs, &format!("🚀 Початок сканування проєкту '{}'...", project_name));
+        add_log(&mut progress_logs, &format!("🚀 Початок сканування проєкту '{}' (Шлях: '{}')...", project_name, root_dir.display()));
 
         on_progress(ScanProgress {
             is_scanning: true,
@@ -148,13 +148,51 @@ impl NativeJavaScanner {
         };
 
         // 1. Detect Modules (Maven pom.xml / Gradle settings.gradle)
+        add_log(&mut progress_logs, "🔍 [Етап 1.1] Пошук дескрипторів збірки (pom.xml, build.gradle, settings.gradle)...");
         self.detect_modules(root_dir, &mut model)?;
+        if !model.modules.is_empty() {
+            let mod_names: Vec<&str> = model.modules.iter().map(|m| m.name.as_str()).take(10).collect();
+            add_log(
+                &mut progress_logs,
+                &format!(
+                    "📦 [Етап 1.1] Виявлено {} модулів: {}{}",
+                    model.modules.len(),
+                    mod_names.join(", "),
+                    if model.modules.len() > 10 { " ..." } else { "" }
+                ),
+            );
+        } else {
+            add_log(&mut progress_logs, "📦 [Етап 1.1] Монолітний проєкт (окремих підмодулів не виявлено).");
+        }
 
         // 2. Discover GWT Modules (*.gwt.xml) & Web Servlets (web.xml)
+        add_log(&mut progress_logs, "🌐 [Етап 1.2] Пошук дескрипторів GWT (*.gwt.xml) та сервлетів (web.xml)...");
         let gwt_modules = self.discover_gwt_modules(root_dir);
         let web_servlets = self.discover_web_xml_servlets(root_dir);
+        if !gwt_modules.is_empty() {
+            add_log(
+                &mut progress_logs,
+                &format!(
+                    "🌐 [Етап 1.2] Знайдено {} GWT модулів та {} сервлетів у web.xml",
+                    gwt_modules.len(),
+                    web_servlets.len()
+                ),
+            );
+            for gwt in gwt_modules.iter().take(5) {
+                add_log(
+                    &mut progress_logs,
+                    &format!(
+                        "   ↳ GWT модуль: '{}' (rename-to: '{}', entry-points: {})",
+                        gwt.module_name,
+                        gwt.rename_to.as_deref().unwrap_or("-"),
+                        gwt.entry_points.len()
+                    ),
+                );
+            }
+        }
 
         // Fast discovery of .java files with early pruning of build/cache directories
+        add_log(&mut progress_logs, "📂 [Етап 1.3] Обхід дерева файлів та пошук вихідного коду Java (*.java)...");
         let mut java_files: Vec<PathBuf> = Vec::new();
         let walker = WalkDir::new(root_dir).into_iter().filter_entry(|e| {
             let name = e.file_name().to_str().unwrap_or("");
@@ -180,15 +218,20 @@ impl NativeJavaScanner {
         }
 
         let total_files = java_files.len();
+        let discovery_ms = start_time.elapsed().as_millis();
         add_log(
             &mut progress_logs,
             &format!(
-                "📦 [Етап 1/4] Виявлено {} Java файлів у {} модулях (знайдено {} GWT модулів)",
+                "✅ [Етап 1/4] Виявлено {} Java файлів у {} модулях за {}мс",
                 total_files,
                 model.modules.len(),
-                gwt_modules.len()
+                discovery_ms
             ),
         );
+
+        if total_files == 0 {
+            add_log(&mut progress_logs, "⚠️ [WARN] У каталозі не знайдено жодного *.java файлу.");
+        }
 
         on_progress(ScanProgress {
             is_scanning: true,
@@ -197,7 +240,7 @@ impl NativeJavaScanner {
             total_stages: 4,
             processed_items: 0,
             total_items: total_files,
-            percentage: 12.0,
+            percentage: 15.0,
             current_file: None,
             modules_found: model.modules.len(),
             packages_found: 0,
@@ -211,12 +254,16 @@ impl NativeJavaScanner {
         });
 
         // 3. Scan all .java files in parallel with Rayon
+        add_log(
+            &mut progress_logs,
+            &format!("⚡ [Етап 2/4] Запуск паралельного синтаксичного аналізу AST для {} файлів на пулі Rayon...", total_files),
+        );
         let processed_counter = Arc::new(AtomicUsize::new(0));
-        let _last_log_time = Arc::new(Mutex::new(Instant::now()));
 
         let modules_ref = &model.modules;
         let gwt_modules_ref = &gwt_modules;
 
+        let parse_start = Instant::now();
         let parsed_results: Vec<Result<Vec<ClassInfo>>> = java_files
             .par_iter()
             .map(|file_path| {
@@ -228,38 +275,44 @@ impl NativeJavaScanner {
 
         let mut classes_by_simple_name: HashMap<String, Vec<String>> = HashMap::new();
         let mut package_map: HashMap<String, PackageInfo> = HashMap::new();
+        let mut parse_errors_count = 0;
 
         for res in parsed_results {
-            if let Ok(class_infos) = res {
-                for class_info in class_infos {
-                    classes_by_simple_name
-                        .entry(class_info.name.clone())
-                        .or_default()
-                        .push(class_info.id.clone());
+            match res {
+                Ok(class_infos) => {
+                    for class_info in class_infos {
+                        classes_by_simple_name
+                            .entry(class_info.name.clone())
+                            .or_default()
+                            .push(class_info.id.clone());
 
-                    // Track package
-                    let pkg_entry = package_map
-                        .entry(class_info.package_name.clone())
-                        .or_insert_with(|| PackageInfo {
-                            id: class_info.package_name.clone(),
-                            name: class_info.package_name.clone(),
-                            module_name: class_info.module_name.clone(),
-                            class_ids: Vec::new(),
-                            subpackage_ids: Vec::new(),
-                            metrics: None,
-                        });
-                    pkg_entry.class_ids.push(class_info.id.clone());
+                        // Track package
+                        let pkg_entry = package_map
+                            .entry(class_info.package_name.clone())
+                            .or_insert_with(|| PackageInfo {
+                                id: class_info.package_name.clone(),
+                                name: class_info.package_name.clone(),
+                                module_name: class_info.module_name.clone(),
+                                class_ids: Vec::new(),
+                                subpackage_ids: Vec::new(),
+                                metrics: None,
+                            });
+                        pkg_entry.class_ids.push(class_info.id.clone());
 
-                    model.classes.push(class_info);
+                        model.classes.push(class_info);
+                    }
+                }
+                Err(_) => {
+                    parse_errors_count += 1;
                 }
             }
         }
 
         let total_classes = model.classes.len();
         let total_packages = package_map.len();
-        let parse_elapsed = start_time.elapsed().as_secs_f64();
-        let parse_speed = if parse_elapsed > 0.0 {
-            total_files as f64 / parse_elapsed
+        let parse_elapsed_sec = parse_start.elapsed().as_secs_f64();
+        let parse_speed = if parse_elapsed_sec > 0.0 {
+            total_files as f64 / parse_elapsed_sec
         } else {
             0.0
         };
@@ -267,8 +320,8 @@ impl NativeJavaScanner {
         add_log(
             &mut progress_logs,
             &format!(
-                "⚡ [Етап 2/4] Синтаксичний аналіз завершено: {} класів у {} пакетах ({:.0} файлів/сек)",
-                total_classes, total_packages, parse_speed
+                "⚡ [Етап 2/4] Синтаксичний аналіз завершено: {} класів у {} пакетах ({:.0} файлів/сек, час: {:.2}с, помилок: {})",
+                total_classes, total_packages, parse_speed, parse_elapsed_sec, parse_errors_count
             ),
         );
 
