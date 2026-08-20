@@ -132,8 +132,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, [matchedClasses, isSearching]);
 
   // 3. Normal structure (when NOT searching)
-  const { packagesByModMap } = useMemo(() => {
+  const { packagesByModMap, classesByPkgMap } = useMemo(() => {
     const modMap = new Map<string, PackageInfo[]>();
+    const pkgMap = new Map<string, ClassInfo[]>();
+
     if (project) {
       for (const p of project.packages) {
         if (hasModuleFilter && !selectedModules.includes(p.module_name)) continue;
@@ -145,9 +147,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }
         list.push(p);
       }
+
+      for (const c of project.classes) {
+        if (hideDTOs && (c.name.endsWith('Dto') || c.name.endsWith('DTO') || c.name.endsWith('VO'))) continue;
+        const key = c.package_name;
+        let list = pkgMap.get(key);
+        if (!list) {
+          list = [];
+          pkgMap.set(key, list);
+        }
+        list.push(c);
+      }
     }
-    return { packagesByModMap: modMap };
-  }, [project, hasModuleFilter, selectedModules]);
+    return { packagesByModMap: modMap, classesByPkgMap: pkgMap };
+  }, [project, hasModuleFilter, selectedModules, hideDTOs]);
 
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
     const saved = localStorage.getItem('javalens_sidebar_width');
@@ -492,6 +505,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 </span>
                               </div>
                             </div>
+
+                            {/* Classes inside this Package */}
+                            {isPkgExpanded && (
+                              <div className="pl-3 space-y-0.5 border-l border-purple-500/10 ml-3.5">
+                                {(classesByPkgMap.get(pkg.name) || []).map((cls) => {
+                                  const isSelected = selectedNodeId === cls.id;
+                                  return (
+                                    <button
+                                      key={cls.id}
+                                      onClick={() => onSelectNode(cls.id)}
+                                      className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-mono transition-all text-left truncate ${
+                                        isSelected
+                                          ? 'bg-sky-500/30 text-sky-200 border border-sky-500/60 font-bold shadow-md'
+                                          : 'text-slate-300 hover:bg-white/5 hover:text-white'
+                                      }`}
+                                      title={cls.id}
+                                    >
+                                      <FileCode className={`w-3 h-3 flex-shrink-0 ${isSelected ? 'text-sky-400' : 'text-slate-400'}`} />
+                                      <span className="truncate">{cls.name}</span>
+                                      {cls.annotations.length > 0 && (
+                                        <span className="text-[8px] text-amber-400 ml-auto flex-shrink-0">
+                                          @{cls.annotations[0]}
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
                         );
                       })}

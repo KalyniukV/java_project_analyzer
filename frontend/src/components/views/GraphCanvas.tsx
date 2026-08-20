@@ -95,9 +95,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       layoutOptions = {
         name: 'dagre',
         rankDir: 'TB',
-        nodeSep: 60,
-        rankSep: 80,
-        edgeSep: 30,
+        nodeSep: 70,
+        rankSep: 90,
+        edgeSep: 35,
         animate: true,
         animationDuration: 300,
         fit: true,
@@ -112,8 +112,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         animationDuration: 300,
         fit: true,
         padding: 50,
-        nodeSeparation: 80,
-        idealEdgeLength: 120,
+        nodeSeparation: 90,
+        idealEdgeLength: 140,
       };
     } else if (mode === 'grid') {
       layoutOptions = {
@@ -159,11 +159,33 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       const isModule = node.category === 'module' || activeView === 'modules';
       const isPackage = node.category === 'package' || activeView === 'packages';
 
+      // Build Rich Multiline Label
+      let layerTag = 'CLASS';
+      if (isModule) layerTag = 'MODULE';
+      else if (isPackage) layerTag = 'PACKAGE';
+      else if (isInterface) layerTag = 'INTERFACE';
+      else if (layer === 'ui' || category === 'controller') layerTag = 'CONTROLLER / UI';
+      else if (layer === 'service' || category === 'service') layerTag = 'SERVICE';
+      else if (layer === 'repository' || category === 'repository' || category === 'dao') layerTag = 'REPOSITORY / DAO';
+      else if (layer === 'domain' || category === 'entity') layerTag = 'ENTITY / MODEL';
+      else if (node.sub_label?.includes('GWT')) layerTag = 'GWT RPC';
+
+      const lines: string[] = [];
+      lines.push(`« ${layerTag} »`);
+      lines.push(node.label);
+      if (node.sub_label && !isModule && !isPackage) {
+        lines.push(node.sub_label);
+      }
+      lines.push(`⬇ ${node.degree_in || 0} in  •  ⬆ ${node.degree_out || 0} out`);
+
+      const displayLabel = lines.join('\n');
+
       elements.push({
         group: 'nodes',
         data: {
           id: node.id,
           label: node.label,
+          displayLabel: displayLabel,
           category: category,
           layer: layer,
           degreeIn: node.degree_in || 0,
@@ -200,27 +222,28 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       maxZoom: 4.0,
       wheelSensitivity: 0.25,
       style: [
-        // BASE NODE STYLING
+        // BASE NODE STYLING (Rich Card Format)
         {
           selector: 'node',
           style: {
             'shape': 'round-rectangle',
-            'width': '190px',
-            'height': '52px',
+            'width': '250px',
+            'height': '72px',
             'background-color': '#161b22',
             'border-width': '2px',
             'border-color': '#30363d',
             'border-opacity': 1,
             'corner-radius': '10px',
-            'label': 'data(label)',
+            'label': 'data(displayLabel)',
             'color': '#ffffff',
             'font-family': 'JetBrains Mono, Fira Code, monospace',
-            'font-size': '12px',
+            'font-size': '11px',
             'font-weight': 'bold',
             'text-valign': 'center',
             'text-halign': 'center',
-            'text-wrap': 'ellipsis',
-            'text-max-width': '170px',
+            'text-wrap': 'wrap',
+            'text-max-width': '235px',
+            'line-height': 1.35,
             'text-outline-color': '#0d1117',
             'text-outline-width': '2px',
             'transition-property': 'background-color, border-color, border-width, opacity',
@@ -266,8 +289,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           style: {
             'background-color': '#3b0764',
             'border-color': '#c084fc',
-            'width': '210px',
-            'height': '56px',
+            'width': '260px',
+            'height': '68px',
           },
         },
         // Modules
@@ -276,9 +299,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           style: {
             'background-color': '#022c22',
             'border-color': '#10b981',
-            'width': '230px',
-            'height': '60px',
-            'font-size': '13px',
+            'width': '270px',
+            'height': '72px',
+            'font-size': '12px',
           },
         },
         // SELECTED NODE STYLING
