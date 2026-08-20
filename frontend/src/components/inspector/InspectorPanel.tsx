@@ -27,6 +27,30 @@ interface InspectorPanelProps {
   onOpenCallHierarchy?: (memberId: string) => void;
 }
 
+const getRelationKindBadge = (kind?: string, label?: string) => {
+  if (kind === 'Extends') {
+    return { badge: 'extends', color: 'bg-amber-500/20 text-[#fb923c] border-amber-500/40', icon: '🧬' };
+  }
+  if (kind === 'Implements') {
+    return { badge: 'implements', color: 'bg-cyan-500/20 text-[#38bdf8] border-cyan-500/40', icon: '🔌' };
+  }
+  if (kind === 'FieldDependency') {
+    const isDI = label?.includes('@Autowired') || label?.includes('@Inject');
+    return { badge: isDI ? '@Autowired' : 'Поле', color: 'bg-purple-500/20 text-[#c084fc] border-purple-500/40', icon: '💉' };
+  }
+  if (kind === 'MethodCall') {
+    return { badge: 'Виклик', color: 'bg-blue-500/20 text-[#38bdf8] border-blue-500/40', icon: '📞' };
+  }
+  if (kind === 'MethodSignature') {
+    const isParam = label?.includes('Параметр');
+    return { badge: isParam ? 'Параметр' : 'Return', color: 'bg-teal-500/20 text-[#2dd4bf] border-teal-500/40', icon: '📋' };
+  }
+  if (kind === 'GwtRpcCall' || kind === 'GwtRpcBinding') {
+    return { badge: 'GWT RPC', color: 'bg-fuchsia-500/20 text-[#e879f9] border-fuchsia-500/40', icon: '🌐' };
+  }
+  return { badge: 'Зв\'язок', color: 'bg-slate-500/20 text-slate-300 border-slate-500/40', icon: '🔗' };
+};
+
 export const InspectorPanel: React.FC<InspectorPanelProps> = ({
   selectedNodeId,
   graphData,
@@ -198,27 +222,44 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
             <span className="text-xs font-semibold text-sky-400 flex items-center gap-1.5">
               <ArrowDownLeft className="w-3.5 h-3.5" /> Вхідні залежності ({inboundEdges.length})
             </span>
-            <span className="text-[10px] text-slate-400 font-mono">хто використовує</span>
+            <span className="text-[10px] text-slate-400 font-mono">хто використовує цей клас</span>
           </div>
           {inboundEdges.length === 0 ? (
-            <p className="text-xs text-slate-400 italic">Немає прямих вхідних залежностей</p>
+            <p className="text-xs text-slate-400 italic bg-[#0d1117] p-2.5 rounded-xl border border-[#30363d] text-center">
+              Немає прямих вхідних залежностей
+            </p>
           ) : (
-            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
               {inboundEdges.map((edge) => {
                 const srcLabel = graphData?.nodes.find((n) => n.id === edge.source)?.label || edge.source;
+                const kindInfo = getRelationKindBadge(edge.kind, edge.label);
+
                 return (
                   <button
                     key={edge.id}
                     onClick={() => onSelectNode(edge.source)}
-                    className="w-full text-left p-2 rounded-lg bg-[#0d1117] hover:bg-[#21262d] border border-[#30363d] hover:border-sky-500/50 transition-colors flex items-center justify-between group"
+                    className="w-full text-left p-2.5 rounded-xl bg-[#0d1117] hover:bg-[#1e293b] border border-[#30363d] hover:border-sky-400 transition-all group shadow-sm space-y-1"
                   >
-                    <span className="text-xs font-mono text-slate-200 group-hover:text-sky-300 truncate" title={edge.source}>
-                      {srcLabel}
-                    </span>
-                    {edge.label && (
-                      <span className="text-[9px] font-mono text-slate-400 bg-white/5 px-1 rounded">
-                        {edge.label}
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span
+                        className="text-[13px] font-bold font-mono text-white group-hover:text-sky-300 truncate"
+                        style={{ color: '#ffffff' }}
+                        title={edge.source}
+                      >
+                        {srcLabel}
                       </span>
+                      <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border flex items-center gap-1 flex-shrink-0 ${kindInfo.color}`}>
+                        <span>{kindInfo.icon}</span>
+                        <span>{kindInfo.badge}</span>
+                      </span>
+                    </div>
+                    {edge.label && (
+                      <div
+                        className="text-[10px] font-mono text-slate-300 bg-black/40 px-2 py-0.5 rounded border border-white/5 truncate"
+                        title={edge.label}
+                      >
+                        {edge.label}
+                      </div>
                     )}
                   </button>
                 );
@@ -233,27 +274,44 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
             <span className="text-xs font-semibold text-amber-400 flex items-center gap-1.5">
               <ArrowUpRight className="w-3.5 h-3.5" /> Вихідні залежності ({outboundEdges.length})
             </span>
-            <span className="text-[10px] text-slate-400 font-mono">кого використовує</span>
+            <span className="text-[10px] text-slate-400 font-mono">кого викликає цей клас</span>
           </div>
           {outboundEdges.length === 0 ? (
-            <p className="text-xs text-slate-400 italic">Немає вихідних залежностей</p>
+            <p className="text-xs text-slate-400 italic bg-[#0d1117] p-2.5 rounded-xl border border-[#30363d] text-center">
+              Немає вихідних залежностей
+            </p>
           ) : (
-            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+            <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
               {outboundEdges.map((edge) => {
                 const tgtLabel = graphData?.nodes.find((n) => n.id === edge.target)?.label || edge.target;
+                const kindInfo = getRelationKindBadge(edge.kind, edge.label);
+
                 return (
                   <button
                     key={edge.id}
                     onClick={() => onSelectNode(edge.target)}
-                    className="w-full text-left p-2 rounded-lg bg-[#0d1117] hover:bg-[#21262d] border border-[#30363d] hover:border-amber-500/50 transition-colors flex items-center justify-between group"
+                    className="w-full text-left p-2.5 rounded-xl bg-[#0d1117] hover:bg-[#1e293b] border border-[#30363d] hover:border-amber-400 transition-all group shadow-sm space-y-1"
                   >
-                    <span className="text-xs font-mono text-slate-200 group-hover:text-amber-300 truncate" title={edge.target}>
-                      {tgtLabel}
-                    </span>
-                    {edge.label && (
-                      <span className="text-[9px] font-mono text-slate-400 bg-white/5 px-1 rounded">
-                        {edge.label}
+                    <div className="flex items-center justify-between gap-1.5">
+                      <span
+                        className="text-[13px] font-bold font-mono text-white group-hover:text-amber-300 truncate"
+                        style={{ color: '#ffffff' }}
+                        title={edge.target}
+                      >
+                        {tgtLabel}
                       </span>
+                      <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border flex items-center gap-1 flex-shrink-0 ${kindInfo.color}`}>
+                        <span>{kindInfo.icon}</span>
+                        <span>{kindInfo.badge}</span>
+                      </span>
+                    </div>
+                    {edge.label && (
+                      <div
+                        className="text-[10px] font-mono text-slate-300 bg-black/40 px-2 py-0.5 rounded border border-white/5 truncate"
+                        title={edge.label}
+                      >
+                        {edge.label}
+                      </div>
                     )}
                   </button>
                 );

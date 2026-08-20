@@ -426,9 +426,9 @@ impl NativeJavaScanner {
                         let key = (class_info.id.clone(), target_id.clone(), RelationKind::FieldDependency);
                         if existing_rels.insert(key) {
                             let desc = if field.is_injected {
-                                format!("@Autowired {}", field.name)
+                                format!("@Autowired {} {}", field.type_name, field.name)
                             } else {
-                                format!("field {}", field.name)
+                                format!("Поле '{} {}'", field.type_name, field.name)
                             };
                             relationships.push(Relationship {
                                 id: format!("rel-{}", rel_id_counter),
@@ -465,11 +465,56 @@ impl NativeJavaScanner {
                                         source: class_info.id.clone(),
                                         target: target_id,
                                         kind: RelationKind::MethodCall,
-                                        description: Some(format!("calls {}", method_name)),
+                                        description: Some(format!("Виклик '#{}()' у методі '#{}()'", method_name, method.name)),
                                         is_circular: false,
                                     });
                                     rel_id_counter += 1;
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // E. Method Signatures (Parameters & Return Types)
+            for method in &class_info.methods {
+                // Parameters
+                for param in &method.parameters {
+                    let targets = self.resolve_type(&param.type_name, class_info, &classes_by_simple_name, &class_ids_set);
+                    for target_id in targets {
+                        if target_id != class_info.id {
+                            let key = (class_info.id.clone(), target_id.clone(), RelationKind::MethodSignature);
+                            if existing_rels.insert(key) {
+                                relationships.push(Relationship {
+                                    id: format!("rel-{}", rel_id_counter),
+                                    source: class_info.id.clone(),
+                                    target: target_id,
+                                    kind: RelationKind::MethodSignature,
+                                    description: Some(format!("Параметр '{}: {}' у '#{}()'", param.name, param.type_name, method.name)),
+                                    is_circular: false,
+                                });
+                                rel_id_counter += 1;
+                            }
+                        }
+                    }
+                }
+
+                // Return type
+                if !method.return_type.is_empty() && method.return_type != "void" {
+                    let targets = self.resolve_type(&method.return_type, class_info, &classes_by_simple_name, &class_ids_set);
+                    for target_id in targets {
+                        if target_id != class_info.id {
+                            let key = (class_info.id.clone(), target_id.clone(), RelationKind::MethodSignature);
+                            if existing_rels.insert(key) {
+                                relationships.push(Relationship {
+                                    id: format!("rel-{}", rel_id_counter),
+                                    source: class_info.id.clone(),
+                                    target: target_id,
+                                    kind: RelationKind::MethodSignature,
+                                    description: Some(format!("Повертається з '#{}()'", method.name)),
+                                    is_circular: false,
+                                });
+                                rel_id_counter += 1;
                             }
                         }
                     }
