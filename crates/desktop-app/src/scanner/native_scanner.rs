@@ -288,6 +288,21 @@ impl NativeJavaScanner {
                             .or_default()
                             .push(class_info.id.clone());
 
+                        // Index inner class under short name and dot/dollar variants
+                        if class_info.name.contains('.') {
+                            let last_part = class_info.name.split('.').last().unwrap_or(&class_info.name);
+                            classes_by_simple_name
+                                .entry(last_part.to_string())
+                                .or_default()
+                                .push(class_info.id.clone());
+
+                            let dollar_variant = class_info.name.replace('.', "$");
+                            classes_by_simple_name
+                                .entry(dollar_variant)
+                                .or_default()
+                                .push(class_info.id.clone());
+                        }
+
                         // Track package
                         let pkg_entry = package_map
                             .entry(class_info.package_name.clone())
@@ -944,6 +959,8 @@ impl NativeJavaScanner {
             }
         }
 
+        let file_stem = file_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+
         // Extract classes declared in file
         let mut results = Vec::new();
         for cap in self.class_regex.captures_iter(&content) {
@@ -987,10 +1004,23 @@ impl NativeJavaScanner {
                 })
                 .unwrap_or_default();
 
-            let fqcn = if package_name == "default" {
-                simple_name.clone()
+            // Check if this is an inner/nested class within the file
+            let is_inner_class = !file_stem.is_empty()
+                && simple_name != file_stem
+                && (content.contains(&format!("class {}", file_stem))
+                    || content.contains(&format!("interface {}", file_stem))
+                    || content.contains(&format!("enum {}", file_stem)));
+
+            let display_name = if is_inner_class {
+                format!("{}.{}", file_stem, simple_name)
             } else {
-                format!("{}.{}", package_name, simple_name)
+                simple_name.clone()
+            };
+
+            let fqcn = if package_name == "default" {
+                display_name.clone()
+            } else {
+                format!("{}.{}", package_name, display_name)
             };
 
             // Extract fields
@@ -1307,9 +1337,70 @@ impl NativeJavaScanner {
             return vec![same_pkg_fqcn];
         }
 
-        // 3. Lookup by simple name
+        // 3. Direct lookup by simple name
         if let Some(fqcns) = by_simple_name.get(clean_type) {
             return fqcns.clone();
+        }
+
+        // 4. Nested / Inner class resolution (e.g. "Outer.Inner" or "com.pkg.Outer.Inner" or "Map.Entry")
+        if clean_type.contains('.') {
+            let parts: Vec<&str> = clean_type.split('.').collect();
+
+            // Check if full path with $ instead of . exists (e.g. com.pkg.Outer$Inner)
+            let dollar_fqcn = clean_type.replace('.', "$");
+            if all_ids.contains(&dollar_fqcn) {
+                return vec![dollar_fqcn];
+            }
+
+            let same_pkg_dollar = format!("{}.{}", current_class.package_name, clean_type.replace('.', "$"));
+            if all_ids.contains(&same_pkg_dollar) {
+                return vec![same_pkg_dollar];
+            }
+
+            // If "Outer.Inner": check if Outer is a known class
+            let outer_name = parts[0];
+            if let Some(outer_fqcns) = by_simple_name.get(outer_name) {
+                // If specific inner class exists in all_ids, return it, otherwise resolve to Outer class
+                let mut resolved = Vec::new();
+                for outer_fqcn in outer_fqcns {
+                    let full_inner_dot = format!("{}.{}", outer_fqcn, parts[1..].join("."));
+                    let full_inner_dollar = format!("{}${}", outer_fqcn, parts[1..].join("$"));
+                    if all_ids.contains(&full_inner_dot) {
+                        resolved.push(full_inner_dot);
+                    } else if all_ids.contains(&full_inner_dollar) {
+                        resolved.push(full_inner_dollar);
+                    } else {
+                        resolved.push(outer_fqcn.clone());
+                    }
+                }
+                if !resolved.is_empty() {
+                    return resolved;
+                }
+            }
+
+            // Check package prefixes: e.g. "com.pkg.Outer.Inner" -> find "com.pkg.Outer"
+            for i in (1..parts.len()).rev() {
+                let candidate_outer = parts[..i].join(".");
+                if all_ids.contains(&candidate_outer) {
+                    return vec![candidate_outer];
+                }
+            }
+        }
+
+        // 5. If current class IS an inner class (e.g. "Outer.Inner"), and references Outer or sibling inner
+        if current_class.name.contains('.') {
+            let outer_simple = current_class.name.split('.').next().unwrap_or(&current_class.name);
+            if clean_type == outer_simple {
+                let outer_fqcn = format!("{}.{}", current_class.package_name, outer_simple);
+                if all_ids.contains(&outer_fqcn) {
+                    return vec![outer_fqcn];
+                }
+            }
+
+            let sibling_inner = format!("{}.{}", outer_simple, clean_type);
+            if let Some(fqcns) = by_simple_name.get(&sibling_inner) {
+                return fqcns.clone();
+            }
         }
 
         Vec::new()
@@ -1361,5 +1452,46 @@ mod tests {
         let presenter = model.classes.iter().find(|c| c.name == "GreetingPresenter").unwrap();
         let on_send_btn = presenter.methods.iter().find(|m| m.name == "onSendButtonClicked").unwrap();
         assert!(on_send_btn.called_methods.iter().any(|c| c.contains("greetServer")));
+    }
+
+    #[test]
+    fn test_inner_class_resolution() {
+        let scanner = NativeJavaScanner::new();
+        let current_cls = ClassInfo {
+            id: "com.example.service.OrderService".to_string(),
+            name: "OrderService".to_string(),
+            package_name: "com.example.service".to_string(),
+            module_name: "order-mod".to_string(),
+            layer: ArchitectureLayer::Service,
+            file_path: "OrderService.java".to_string(),
+            line_number: 1,
+            kind: ClassKind::Class,
+            is_public: true,
+            loc: 100,
+            super_class: None,
+            interfaces: Vec::new(),
+            annotations: Vec::new(),
+            fields: Vec::new(),
+            methods: Vec::new(),
+            referenced_types: Vec::new(),
+        };
+
+        let mut by_simple_name = HashMap::new();
+        by_simple_name.insert("OrderDTO".to_string(), vec!["com.example.dto.OrderDTO".to_string()]);
+        by_simple_name.insert("OrderDTO.Status".to_string(), vec!["com.example.dto.OrderDTO.Status".to_string()]);
+        by_simple_name.insert("Status".to_string(), vec!["com.example.dto.OrderDTO.Status".to_string()]);
+
+        let mut all_ids = HashSet::new();
+        all_ids.insert("com.example.dto.OrderDTO".to_string());
+        all_ids.insert("com.example.dto.OrderDTO.Status".to_string());
+        all_ids.insert("com.example.service.OrderService".to_string());
+
+        // 1. Direct qualified inner class: OrderDTO.Status
+        let res1 = scanner.resolve_type("OrderDTO.Status", &current_cls, &by_simple_name, &all_ids);
+        assert_eq!(res1, vec!["com.example.dto.OrderDTO.Status".to_string()]);
+
+        // 2. Unregistered inner class fallback to Outer: OrderDTO.Builder -> com.example.dto.OrderDTO
+        let res2 = scanner.resolve_type("OrderDTO.Builder", &current_cls, &by_simple_name, &all_ids);
+        assert_eq!(res2, vec!["com.example.dto.OrderDTO".to_string()]);
     }
 }
