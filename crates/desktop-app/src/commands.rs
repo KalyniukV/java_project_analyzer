@@ -60,28 +60,37 @@ pub async fn scan_project(
     }
 
     let progress_ref = state.scan_progress.clone();
-    let scanner = NativeJavaScanner::new();
+    let state_storage = state.storage.clone();
 
-    match scanner.scan_project_with_progress(&path_buf, move |prog| {
+    let res = tokio::task::spawn_blocking(move || {
+        let scanner = NativeJavaScanner::new();
         let p_ref = progress_ref.clone();
-        tokio::spawn(async move {
-            let mut lock = p_ref.write().await;
-            *lock = prog;
-        });
-    }) {
-        Ok(model) => {
-            let scan_time_ms = model.scan_time_ms;
-            let project_name = model.project_name.clone();
-            let root_path = model.root_path.clone();
 
-            // Store in embedded NoSQL DB
-            if let Err(e) = state.storage.save_project(&model) {
-                eprintln!("[IPC] ⚠️ Failed to store project in NoSQL DB: {}", e);
-            } else {
-                println!("[IPC] 💾 Проєкт успішно збережено у вбудовану NoSQL DB (redb).");
+        let model = scanner.scan_project_with_progress(&path_buf, move |prog| {
+            if let Ok(mut lock) = p_ref.try_write() {
+                *lock = prog;
             }
+        })?;
 
-            let analyzer = GraphAnalyzer::new(model);
+        let scan_time_ms = model.scan_time_ms;
+        let project_name = model.project_name.clone();
+        let root_path = model.root_path.clone();
+
+        // Store in embedded NoSQL DB
+        if let Err(e) = state_storage.save_project(&model) {
+            eprintln!("[IPC] ⚠️ Failed to store project in NoSQL DB: {}", e);
+        } else {
+            println!("[IPC] 💾 Проєкт успішно збережено у вбудовану NoSQL DB (redb).");
+        }
+
+        let analyzer = GraphAnalyzer::new(model);
+        Ok::<_, anyhow::Error>((project_name, root_path, scan_time_ms, analyzer))
+    })
+    .await
+    .map_err(|e| format!("Worker thread error: {}", e))?;
+
+    match res {
+        Ok((project_name, root_path, scan_time_ms, analyzer)) => {
             let mut lock = state.current_analyzer.write().await;
             *lock = Some(analyzer);
 

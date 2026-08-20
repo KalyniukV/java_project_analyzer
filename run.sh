@@ -5,6 +5,10 @@
 # ==============================================================================
 set -e
 
+# Fix WebKitGTK black screen issue on Linux during high CPU loads
+export WEBKIT_DISABLE_COMPOSITING_MODE=1
+export WEBKIT_DISABLE_DMABUF_RENDERER=1
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
