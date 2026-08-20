@@ -21,158 +21,174 @@ export const CustomGraphNode = memo(({ data, selected }: NodeProps<any>) => {
   const highlight = node.highlight_state;
   const isExternal = node.is_external === true;
 
-  // Determine highlight classes
-  let borderClass = isExternal
-    ? 'border-dashed border-slate-500/60 bg-[#161b22]/75 hover:border-slate-400'
-    : 'border-[#30363d] bg-[#161b22]/95';
-  let opacityClass = isExternal ? 'opacity-85' : 'opacity-100';
-  let glowClass = '';
-
-  if (highlight === 'Selected' || selected) {
-    borderClass = 'border-[#38bdf8] bg-[#161b22] ring-2 ring-[#38bdf8]/50';
-    glowClass = 'glow-selected';
-    opacityClass = 'opacity-100';
-  } else if (highlight === 'InboundActive') {
-    borderClass = 'border-[#38bdf8] bg-[#0c2438]/90 ring-1 ring-[#38bdf8]/40';
-    glowClass = 'glow-cyan';
-    opacityClass = 'opacity-100';
-  } else if (highlight === 'OutboundActive') {
-    borderClass = 'border-[#fb923c] bg-[#331c0e]/90 ring-1 ring-[#fb923c]/40';
-    glowClass = 'glow-amber';
-    opacityClass = 'opacity-100';
-  } else if (highlight === 'MutualActive') {
-    borderClass = 'border-[#ef4444] bg-[#381111]/90 ring-1 ring-[#ef4444]/60';
-    glowClass = 'glow-red';
-    opacityClass = 'opacity-100';
-  } else if (highlight === 'Dimmed') {
-    opacityClass = 'opacity-25 grayscale-[60%]';
-  }
-
-  // Category Icon & Badge
+  // Determine Layer Header & Accent Colors
+  let layerColor = 'bg-slate-700 text-slate-200 border-slate-600';
+  let layerName = 'COMPONENT';
   let Icon = FileCode;
-  let categoryBadge = 'Class';
-  let badgeColor = 'bg-blue-500/20 text-blue-400 border-blue-500/30';
 
   if (node.category === 'module') {
     Icon = Box;
-    categoryBadge = 'Module';
-    badgeColor = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30';
+    layerName = 'MODULE';
+    layerColor = 'bg-emerald-700 text-emerald-100 border-emerald-500';
   } else if (node.category === 'package') {
     Icon = Folder;
-    categoryBadge = 'Package';
-    badgeColor = 'bg-purple-500/20 text-purple-400 border-purple-500/30';
+    layerName = 'PACKAGE';
+    layerColor = 'bg-purple-700 text-purple-100 border-purple-500';
   } else if (node.sub_label?.includes('RemoteServiceRelativePath') || node.sub_label?.includes('GWT:RemoteService')) {
     Icon = Radio;
-    categoryBadge = 'GWT RPC';
-    badgeColor = 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40';
+    layerName = 'GWT RPC';
+    layerColor = 'bg-fuchsia-700 text-fuchsia-100 border-fuchsia-500';
   } else if (node.sub_label?.includes('GWT:RemoteServiceServlet')) {
     Icon = Radio;
-    categoryBadge = 'GWT Servlet';
-    badgeColor = 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
+    layerName = 'GWT SERVLET';
+    layerColor = 'bg-indigo-700 text-indigo-100 border-indigo-500';
   } else if (node.sub_label?.includes('GWT:EntryPoint')) {
     Icon = Tv;
-    categoryBadge = 'GWT Entry';
-    badgeColor = 'bg-pink-500/20 text-pink-300 border-pink-500/40';
+    layerName = 'GWT ENTRY';
+    layerColor = 'bg-pink-700 text-pink-100 border-pink-500';
   } else if (node.label.endsWith('Async')) {
     Icon = Radio;
-    categoryBadge = 'GWT Async';
-    badgeColor = 'bg-purple-500/20 text-purple-300 border-purple-500/40';
+    layerName = 'GWT ASYNC';
+    layerColor = 'bg-purple-700 text-purple-100 border-purple-500';
   } else if (node.category === 'interface') {
     Icon = Layers;
-    categoryBadge = 'Interface';
-    badgeColor = 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30';
-  } else if (node.sub_label?.includes('@Service')) {
-    Icon = Component;
-    categoryBadge = 'Service';
-    badgeColor = 'bg-amber-500/20 text-amber-400 border-amber-500/30';
-  } else if (node.sub_label?.includes('@RestController') || node.sub_label?.includes('@Controller')) {
+    layerName = 'INTERFACE';
+    layerColor = 'bg-cyan-700 text-cyan-100 border-cyan-500';
+  } else if (node.layer === 'UI' || node.sub_label?.includes('@RestController') || node.sub_label?.includes('@Controller')) {
     Icon = ShieldCheck;
-    categoryBadge = 'Controller';
-    badgeColor = 'bg-rose-500/20 text-rose-400 border-rose-500/30';
-  } else if (node.sub_label?.includes('@Repository')) {
+    layerName = 'CONTROLLER / UI';
+    layerColor = 'bg-emerald-700 text-emerald-100 border-emerald-500';
+  } else if (node.layer === 'Service' || node.sub_label?.includes('@Service')) {
+    Icon = Component;
+    layerName = 'SERVICE';
+    layerColor = 'bg-sky-700 text-sky-100 border-sky-500';
+  } else if (node.layer === 'Infrastructure' || node.sub_label?.includes('@Repository')) {
     Icon = Database;
-    categoryBadge = 'Repository';
-    badgeColor = 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30';
+    layerName = 'REPOSITORY / DAO';
+    layerColor = 'bg-indigo-700 text-indigo-100 border-indigo-500';
+  } else if (node.layer === 'Domain' || node.sub_label?.includes('@Entity')) {
+    Icon = FileCode;
+    layerName = 'DOMAIN MODEL';
+    layerColor = 'bg-amber-700 text-amber-100 border-amber-500';
+  }
+
+  // Highlight state styling (clean solid borders, no fuzzy neon blur)
+  let cardBorder = isExternal
+    ? 'border-dashed border-slate-500 bg-[#161b22]'
+    : 'border-[#30363d] bg-[#161b22]';
+  let cardOpacity = isExternal ? 'opacity-90' : 'opacity-100';
+
+  if (highlight === 'Selected' || selected) {
+    cardBorder = 'border-2 border-sky-400 ring-2 ring-sky-400/30 bg-[#1c2333] shadow-xl';
+    cardOpacity = 'opacity-100';
+  } else if (highlight === 'InboundActive') {
+    cardBorder = 'border-2 border-sky-400 bg-[#0f2438] shadow-lg';
+    cardOpacity = 'opacity-100';
+  } else if (highlight === 'OutboundActive') {
+    cardBorder = 'border-2 border-amber-400 bg-[#331d0c] shadow-lg';
+    cardOpacity = 'opacity-100';
+  } else if (highlight === 'MutualActive') {
+    cardBorder = 'border-2 border-rose-500 bg-[#381111] shadow-lg';
+    cardOpacity = 'opacity-100';
+  } else if (highlight === 'Dimmed') {
+    cardOpacity = 'opacity-20 grayscale';
   }
 
   return (
     <div
-      className={`min-w-[220px] max-w-[320px] rounded-xl border p-3.5 shadow-2xl backdrop-blur-md transition-all duration-200 cursor-pointer ${borderClass} ${opacityClass} ${glowClass}`}
+      className={`w-[270px] rounded-lg border shadow-md transition-all duration-150 cursor-pointer overflow-hidden ${cardBorder} ${cardOpacity}`}
     >
+      {/* Top Handle (Inbound Target) */}
       <Handle
         type="target"
         position={Position.Top}
-        className="!bg-[#38bdf8] !w-2.5 !h-2.5 !border-2 !border-[#0d1117]"
+        className="!bg-sky-400 !w-3 !h-3 !border-2 !border-[#0d1117] !-top-1.5"
       />
 
-      {/* External boundary indicator pill */}
-      {isExternal && (
-        <div className="flex items-center gap-1 text-[9px] font-mono text-slate-400 bg-black/40 px-2 py-0.5 rounded mb-2 border border-dashed border-slate-600/60 w-fit">
-          <Globe className="w-2.5 h-2.5 text-slate-400" />
-          <span>Зовнішній зв'язок (External)</span>
-        </div>
-      )}
+      {/* Left Handle (Inbound Target) */}
+      <Handle
+        type="target"
+        id="left"
+        position={Position.Left}
+        className="!bg-sky-400 !w-3 !h-3 !border-2 !border-[#0d1117] !-left-1.5"
+      />
 
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2 overflow-hidden">
-          <div className="p-1.5 rounded-lg bg-white/5 text-slate-300">
-            <Icon className="w-4 h-4" />
-          </div>
-          <span className="font-semibold text-sm text-slate-100 truncate tracking-tight">
-            {node.label}
-          </span>
-        </div>
-        <div className="flex items-center gap-1 flex-shrink-0">
-          {node.hop_depth !== undefined && node.hop_depth > 0 && (
-            <span
-              className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full border ${
-                node.hop_depth === 1
-                  ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
-                  : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
-              }`}
-              title={node.hop_depth === 1 ? 'Пряма залежність (Hop 1)' : `Транзитивна залежність (Глибина Hop ${node.hop_depth})`}
-            >
-              {node.hop_depth === 1 ? 'Hop 1' : `Hop ${node.hop_depth}`}
-            </span>
-          )}
-          <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${badgeColor}`}>
-            {categoryBadge}
-          </span>
-        </div>
-      </div>
-
-      {node.sub_label && (
-        <div className="text-xs text-slate-400 font-mono truncate mb-2.5 bg-black/20 px-2 py-1 rounded">
-          {node.sub_label}
-        </div>
-      )}
-
-      {node.group && (
-        <div className="text-[11px] text-slate-400 truncate mb-2">
-          📁 {node.group}
-        </div>
-      )}
-
-      <div className="flex items-center justify-between text-[11px] text-slate-400 border-t border-white/5 pt-2 mt-1">
-        <div className="flex items-center gap-3">
-          <span className="flex items-center gap-1 text-sky-400 font-mono" title="Inbound (Incoming) dependencies">
-            <ArrowDownLeft className="w-3 h-3" /> {node.degree_in}
-          </span>
-          <span className="flex items-center gap-1 text-amber-400 font-mono" title="Outbound (Outgoing) dependencies">
-            <ArrowUpRight className="w-3 h-3" /> {node.degree_out}
-          </span>
-        </div>
-        {node.metrics_summary && (
-          <span className="font-mono text-[10px] text-slate-400 truncate max-w-[120px]">
-            {node.metrics_summary}
+      {/* Header Bar with Layer Badge */}
+      <div className={`px-2.5 py-1 text-[10px] font-mono font-bold uppercase tracking-wider flex items-center justify-between border-b ${layerColor}`}>
+        <span className="flex items-center gap-1.5 truncate">
+          <Icon className="w-3.5 h-3.5 flex-shrink-0" />
+          <span className="truncate">{layerName}</span>
+        </span>
+        {node.hop_depth !== undefined && node.hop_depth > 0 && (
+          <span className="text-[9px] px-1.5 py-0.2 rounded bg-black/40 text-white font-bold ml-1 flex-shrink-0">
+            Hop {node.hop_depth}
           </span>
         )}
       </div>
 
+      {/* Main Content */}
+      <div className="p-2.5 space-y-1.5">
+        {/* Class Name */}
+        <div className="font-bold text-sm text-slate-100 truncate tracking-tight" title={node.label}>
+          {node.label}
+        </div>
+
+        {/* Package Path / Sub Label */}
+        {node.group && (
+          <div className="text-[11px] font-mono text-slate-400 truncate flex items-center gap-1" title={node.group}>
+            <span className="text-slate-400">📁</span>
+            <span className="truncate">{node.group.split('.').slice(-2).join('.')}</span>
+          </div>
+        )}
+
+        {node.sub_label && !node.sub_label.includes('LOC') && (
+          <div className="text-[10px] font-mono text-amber-300 truncate bg-black/30 px-1.5 py-0.5 rounded border border-white/5" title={node.sub_label}>
+            {node.sub_label}
+          </div>
+        )}
+
+        {/* Metrics & Inbound / Outbound Count Footer */}
+        <div className="flex items-center justify-between text-[10px] font-mono pt-1.5 border-t border-white/10 mt-1">
+          <div className="flex items-center gap-2">
+            <span
+              className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded font-bold ${
+                node.degree_in > 0 ? 'bg-sky-500/20 text-sky-300' : 'text-slate-400'
+              }`}
+              title={`${node.degree_in} вхідних викликів (хто викликає цей клас)`}
+            >
+              <ArrowDownLeft className="w-2.5 h-2.5" /> {node.degree_in} in
+            </span>
+            <span
+              className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded font-bold ${
+                node.degree_out > 0 ? 'bg-amber-500/20 text-amber-300' : 'text-slate-400'
+              }`}
+              title={`${node.degree_out} вихідних викликів (кого викликає цей клас)`}
+            >
+              <ArrowUpRight className="w-2.5 h-2.5" /> {node.degree_out} out
+            </span>
+          </div>
+
+          {node.metrics_summary && (
+            <span className="text-slate-400 text-[9px] truncate max-w-[90px]">
+              {node.metrics_summary.split(',')[0]}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Right Handle (Outbound Source) */}
+      <Handle
+        type="source"
+        id="right"
+        position={Position.Right}
+        className="!bg-amber-400 !w-3 !h-3 !border-2 !border-[#0d1117] !-right-1.5"
+      />
+
+      {/* Bottom Handle (Outbound Source) */}
       <Handle
         type="source"
         position={Position.Bottom}
-        className="!bg-[#fb923c] !w-2.5 !h-2.5 !border-2 !border-[#0d1117]"
+        className="!bg-amber-400 !w-3 !h-3 !border-2 !border-[#0d1117] !-bottom-1.5"
       />
     </div>
   );

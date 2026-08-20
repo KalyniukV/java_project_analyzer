@@ -72,7 +72,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 }) => {
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('layered');
   const [hideDTOs, setHideDTOs] = useState<boolean>(false);
-  const [onlyActiveEdges, setOnlyActiveEdges] = useState<boolean>(false);
+  const [onlyActiveEdges, setOnlyActiveEdges] = useState<boolean>(true);
 
   const { nodes, edges, swimlanes } = useMemo(() => {
     if (!graphData) return { nodes: [], edges: [], swimlanes: [] };
@@ -360,11 +360,21 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         />
       </ReactFlow>
 
-      {/* Bottom Hint */}
-      <div className="absolute bottom-4 right-4 z-20 pointer-events-none">
-        <div className="px-3 py-1.5 rounded-lg bg-[#161b22]/90 border border-[#30363d] text-[11px] font-mono text-slate-400 shadow-xl backdrop-blur-md flex items-center gap-2">
-          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-          <span>💡 Подвійний клік на модулі/пакеті: розкрити дочірній рівень (Drill-Down)</span>
+      {/* Bottom Hint & Visual Legend */}
+      <div className="absolute bottom-4 right-4 z-20 pointer-events-none flex items-center gap-2">
+        <div className="px-3 py-1.5 rounded-xl bg-[#161b22]/95 border border-[#30363d] text-[11px] font-mono shadow-2xl backdrop-blur-md flex items-center gap-3">
+          <span className="flex items-center gap-1.5 text-sky-300 font-bold">
+            <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
+            <span>⬅ Вхідні (Хто викликає)</span>
+          </span>
+          <span className="flex items-center gap-1.5 text-amber-300 font-bold">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+            <span>➡ Вихідні (Кого викликає)</span>
+          </span>
+          <span className="flex items-center gap-1.5 text-rose-400 font-bold">
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+            <span>⟳ Цикл</span>
+          </span>
         </div>
       </div>
     </div>

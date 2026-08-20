@@ -21,7 +21,7 @@ export const CustomGraphEdge = memo(({
     targetX,
     targetY,
     targetPosition,
-    curvature: 0.25,
+    curvature: 0.2,
   });
 
   const highlight = (data?.highlight_state as EdgeHighlightState) || 'Normal';
@@ -33,56 +33,51 @@ export const CustomGraphEdge = memo(({
   const isIndirect = hopDepth !== undefined && hopDepth >= 2;
   const isDirect = hopDepth === 1;
 
-  // 1. Base Default Styling (Clean, Lightweight, Subtle Background)
-  let strokeColor = isGwtRpc ? '#a855f7' : '#30363d';
+  // 1. Clean Baseline (Subdued when idle to prevent visual spaghetti)
+  let strokeColor = isGwtRpc ? '#a855f7' : '#475569';
   let strokeWidth = 1.0;
-  let opacity = 0.22;
-  let strokeDasharray: string | undefined = isGwtRpc ? '4,4' : undefined;
+  let opacity = 0.18;
+  let strokeDasharray: string | undefined = undefined;
 
-  // 2. Active Highlighting when Node is Selected
+  // 2. Focused highlighting when a node is selected or inspected
   if (highlight === 'InboundActive') {
     if (isIndirect) {
-      strokeColor = '#a78bfa'; // Violet/Indigo dashed
+      strokeColor = '#818cf8';
       strokeWidth = 2.0;
       opacity = 0.9;
-      strokeDasharray = '6,4';
+      strokeDasharray = '5,4';
     } else {
-      strokeColor = isGwtRpc ? '#e879f9' : '#38bdf8'; // Glowing Bright Cyan
-      strokeWidth = 3.0;
+      strokeColor = '#38bdf8'; // Clean Solid Sky Blue for Inbound
+      strokeWidth = 2.5;
       opacity = 1.0;
-      strokeDasharray = isGwtRpc ? '4,4' : undefined;
     }
   } else if (highlight === 'OutboundActive') {
     if (isIndirect) {
-      strokeColor = '#fbbf24'; // Warm Amber dashed
+      strokeColor = '#fbbf24';
       strokeWidth = 2.0;
       opacity = 0.9;
-      strokeDasharray = '6,4';
+      strokeDasharray = '5,4';
     } else {
-      strokeColor = isGwtRpc ? '#d946ef' : '#fb923c'; // Glowing Bright Orange
-      strokeWidth = 3.0;
+      strokeColor = '#fb923c'; // Clean Solid Orange for Outbound
+      strokeWidth = 2.5;
       opacity = 1.0;
-      strokeDasharray = isGwtRpc ? '4,4' : undefined;
     }
   } else if (highlight === 'CircularActive') {
-    // Only solid bright red when an active cycle is SELECTED
-    strokeColor = '#ef4444';
-    strokeWidth = 3.0;
+    strokeColor = '#ef4444'; // Red for cycles
+    strokeWidth = 2.5;
     opacity = 1.0;
   } else if (highlight === 'Dimmed') {
-    strokeColor = '#21262d';
-    strokeWidth = 0.6;
-    opacity = 0.05;
+    strokeColor = '#1e293b';
+    strokeWidth = 0.5;
+    opacity = 0.03; // Effectively hidden to eliminate clutter
   } else if (isCircular) {
-    // Unselected circular edge: subtle muted hint without cluttering the screen
-    strokeColor = 'rgba(239, 68, 68, 0.35)';
-    strokeWidth = 1.2;
-    opacity = 0.35;
+    strokeColor = 'rgba(239, 68, 68, 0.3)';
+    strokeWidth = 1.0;
+    opacity = 0.3;
   }
 
-  // Only render label badges for ACTIVE selected edges to maintain 60 FPS
   const isActive = highlight === 'InboundActive' || highlight === 'OutboundActive' || highlight === 'CircularActive';
-  const showLabel = isActive && (isDirect || isIndirect || (label && label.length > 0));
+  const showBadge = isActive && (isDirect || isIndirect || (label && label.length > 0));
 
   return (
     <>
@@ -98,37 +93,29 @@ export const CustomGraphEdge = memo(({
           strokeDasharray,
         }}
       />
-      {showLabel && (
+      {showBadge && (
         <foreignObject
-          width={150}
-          height={24}
-          x={labelX - 75}
-          y={labelY - 12}
+          width={160}
+          height={26}
+          x={labelX - 80}
+          y={labelY - 13}
           className="pointer-events-none"
         >
           <div className="flex items-center justify-center h-full">
             <span
-              className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-full border shadow-lg truncate max-w-[140px] flex items-center gap-1 backdrop-blur-md ${
-                highlight === 'CircularActive'
-                  ? 'bg-rose-950/95 border-rose-500 text-rose-200'
-                  : isIndirect
-                  ? 'bg-indigo-950/95 border-indigo-400 text-indigo-200'
-                  : isDirect
-                  ? 'bg-[#0d1117]/95 border-sky-400 text-sky-200'
-                  : 'bg-[#161b22]/95 border-[#30363d] text-slate-300'
+              className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded border shadow-md truncate max-w-[150px] flex items-center gap-1 ${
+                highlight === 'InboundActive'
+                  ? 'bg-[#0b2033] border-sky-500 text-sky-200'
+                  : highlight === 'OutboundActive'
+                  ? 'bg-[#331c0c] border-amber-500 text-amber-200'
+                  : highlight === 'CircularActive'
+                  ? 'bg-[#381111] border-rose-500 text-rose-200'
+                  : 'bg-[#161b22] border-[#30363d] text-slate-300'
               }`}
               title={label || `Hop: ${hopDepth}`}
             >
-              {isIndirect ? (
-                <span className="text-[8px] px-1 py-0.1 rounded bg-indigo-500/40 text-indigo-200 font-bold">
-                  Hop {hopDepth}
-                </span>
-              ) : isDirect ? (
-                <span className="text-[8px] px-1 py-0.1 rounded bg-sky-500/30 text-sky-200 font-bold">
-                  Hop 1
-                </span>
-              ) : null}
-              <span className="truncate">{label || (isIndirect ? 'transitive' : 'direct')}</span>
+              {highlight === 'InboundActive' ? '⬅ in' : highlight === 'OutboundActive' ? '➡ out' : '⟳ cycle'}
+              {label && <span className="truncate opacity-90">• {label}</span>}
             </span>
           </div>
         </foreignObject>

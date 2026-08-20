@@ -38,9 +38,6 @@ export function calculateLayout(
     return true;
   });
 
-  const nodeMap = new Map<string, VisualGraphNode>();
-  activeNodes.forEach((n) => nodeMap.set(n.id, n));
-
   switch (mode) {
     case 'layered':
       return calculateLayeredLayout(activeNodes, edges);
@@ -67,7 +64,6 @@ function calculateLayeredLayout(nodes: VisualGraphNode[], edges: VisualGraphEdge
     Other: [],
   };
 
-  // Classify each node into its architectural layer
   for (const node of nodes) {
     const layer = node.layer || determineLayerFromNode(node);
     if (layer === 'UI') {
@@ -84,20 +80,21 @@ function calculateLayeredLayout(nodes: VisualGraphNode[], edges: VisualGraphEdge
   }
 
   const layerOrder: Array<{ key: keyof typeof ranks; label: string; color: string }> = [
-    { key: 'UI', label: 'PRESENTATION / CONTROLLERS', color: 'rgba(56, 189, 248, 0.04)' },
-    { key: 'Service', label: 'APPLICATION / SERVICES', color: 'rgba(251, 146, 60, 0.04)' },
-    { key: 'Infrastructure', label: 'INFRASTRUCTURE / REPOSITORIES & CLIENTS', color: 'rgba(168, 85, 247, 0.04)' },
-    { key: 'Domain', label: 'DOMAIN MODEL & ENTITIES', color: 'rgba(52, 211, 153, 0.04)' },
+    { key: 'UI', label: '1. PRESENTATION / CONTROLLERS & UI', color: 'rgba(16, 185, 129, 0.05)' },
+    { key: 'Service', label: '2. APPLICATION / SERVICES & BUSINESS LOGIC', color: 'rgba(56, 189, 248, 0.05)' },
+    { key: 'Infrastructure', label: '3. INFRASTRUCTURE / REPOSITORIES & SERVLETS', color: 'rgba(168, 85, 247, 0.05)' },
+    { key: 'Domain', label: '4. DOMAIN MODEL & ENTITIES', color: 'rgba(245, 158, 11, 0.05)' },
   ];
 
   if (ranks.Other.length > 0) {
-    layerOrder.push({ key: 'Other', label: 'UTILITIES & OTHER COMPONENTS', color: 'rgba(148, 163, 184, 0.04)' });
+    layerOrder.push({ key: 'Other', label: '5. UTILITIES & COMPONENTS', color: 'rgba(148, 163, 184, 0.05)' });
   }
 
-  const nodeWidth = 280;
-  const nodeHeight = 150;
-  const horizontalGap = 60;
-  const verticalGap = 130;
+  const nodeWidth = 290;
+  const nodeHeight = 130;
+  const horizontalGap = 50;
+  const verticalGap = 40;
+  const maxColsPerRow = 4;
 
   const positionedNodes: PositionedNode[] = [];
   const swimlanes: SwimlaneInfo[] = [];
@@ -108,27 +105,29 @@ function calculateLayeredLayout(nodes: VisualGraphNode[], edges: VisualGraphEdge
     const tierNodes = ranks[tier.key];
     if (tierNodes.length === 0) continue;
 
-    // Sort tier nodes to minimize edge crossings (connected nodes closer together)
-    tierNodes.sort((a, b) => a.label.localeCompare(b.label));
+    // Sort by out-degree descending so callers are on top-left
+    tierNodes.sort((a, b) => b.degree_out - a.degree_out || a.label.localeCompare(b.label));
 
-    const totalWidth = tierNodes.length * nodeWidth + (tierNodes.length - 1) * horizontalGap;
-    const startX = Math.max(60, 60);
+    const totalRows = Math.ceil(tierNodes.length / maxColsPerRow);
+    const laneHeight = totalRows * nodeHeight + (totalRows - 1) * verticalGap + 60;
 
-    const laneHeight = nodeHeight + 80;
     swimlanes.push({
       label: tier.label,
-      y: currentY - 25,
+      y: currentY - 20,
       height: laneHeight,
       color: tier.color,
     });
 
     tierNodes.forEach((node, idx) => {
-      const x = startX + idx * (nodeWidth + horizontalGap);
-      const y = currentY + 15;
+      const row = Math.floor(idx / maxColsPerRow);
+      const col = idx % maxColsPerRow;
+
+      const x = 60 + col * (nodeWidth + horizontalGap);
+      const y = currentY + 30 + row * (nodeHeight + verticalGap);
       positionedNodes.push({ ...node, x, y });
     });
 
-    currentY += laneHeight + verticalGap - 50;
+    currentY += laneHeight + 60;
   }
 
   return { nodes: positionedNodes, swimlanes };
@@ -151,53 +150,45 @@ function calculatePackageClusteredLayout(nodes: VisualGraphNode[]): LayoutResult
   const positionedNodes: PositionedNode[] = [];
   const swimlanes: SwimlaneInfo[] = [];
 
-  const nodeWidth = 260;
-  const nodeHeight = 140;
-  const gapX = 35;
-  const gapY = 30;
+  const nodeWidth = 290;
+  const nodeHeight = 130;
+  const maxCols = 3;
 
-  let clusterX = 60;
-  let clusterY = 60;
-  let maxClusterHeightInRow = 0;
-  const maxRowWidth = 2200;
+  let currentY = 50;
 
-  for (const [pkgName, pkgNodes] of packageGroups.entries()) {
-    const cols = Math.min(3, Math.ceil(Math.sqrt(pkgNodes.length)));
-    const rows = Math.ceil(pkgNodes.length / cols);
+  const sortedPkgs = Array.from(packageGroups.entries()).sort((a, b) => b[1].length - a[1].length);
 
-    const clusterWidth = cols * (nodeWidth + gapX) + 40;
-    const clusterHeight = rows * (nodeHeight + gapY) + 70;
+  for (const [pkgName, pkgNodes] of sortedPkgs) {
+    pkgNodes.sort((a, b) => a.label.localeCompare(b.label));
 
-    if (clusterX + clusterWidth > maxRowWidth && clusterX > 60) {
-      clusterX = 60;
-      clusterY += maxClusterHeightInRow + 80;
-      maxClusterHeightInRow = 0;
-    }
+    const totalRows = Math.ceil(pkgNodes.length / maxCols);
+    const laneHeight = totalRows * nodeHeight + (totalRows - 1) * 35 + 50;
 
     swimlanes.push({
-      label: `PACKAGE: ${pkgName.split('.').slice(-2).join('.')}`,
-      y: clusterY - 20,
-      height: clusterHeight,
-      color: 'rgba(255, 255, 255, 0.02)',
+      label: `PACKAGE: ${pkgName} (${pkgNodes.length} classes)`,
+      y: currentY - 15,
+      height: laneHeight,
+      color: 'rgba(168, 85, 247, 0.05)',
     });
 
     pkgNodes.forEach((node, idx) => {
-      const col = idx % cols;
-      const row = Math.floor(idx / cols);
-      const x = clusterX + 20 + col * (nodeWidth + gapX);
-      const y = clusterY + 30 + row * (nodeHeight + gapY);
+      const row = Math.floor(idx / maxCols);
+      const col = idx % maxCols;
+
+      const x = 60 + col * (nodeWidth + 45);
+      const y = currentY + 25 + row * (nodeHeight + 35);
       positionedNodes.push({ ...node, x, y });
     });
 
-    clusterX += clusterWidth + 50;
-    maxClusterHeightInRow = Math.max(maxClusterHeightInRow, clusterHeight);
+    currentY += laneHeight + 50;
   }
 
   return { nodes: positionedNodes, swimlanes };
 }
 
 /**
- * 3. FOCUS 3-COLUMN LAYOUT (Inputs -> Selected Target -> Outputs)
+ * 3. FOCUS EGO-CENTERED LAYOUT
+ * Target Node in center, Inbound callers on the Left, Outbound callees on the Right
  */
 function calculateFocusLayout(
   nodes: VisualGraphNode[],
@@ -205,130 +196,111 @@ function calculateFocusLayout(
   selectedNodeId: string | null
 ): LayoutResult {
   if (!selectedNodeId) {
-    // If no node selected, fallback to layered
     return calculateLayeredLayout(nodes, edges);
   }
 
-  const inCallers: VisualGraphNode[] = [];
-  const outCallees: VisualGraphNode[] = [];
-  const otherNodes: VisualGraphNode[] = [];
-  let targetNode: VisualGraphNode | null = null;
-
-  const incomingIds = new Set<string>();
-  const outgoingIds = new Set<string>();
-
-  for (const e of edges) {
-    if (e.target === selectedNodeId) incomingIds.add(e.source);
-    if (e.source === selectedNodeId) outgoingIds.add(e.target);
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+  if (!selectedNode) {
+    return calculateLayeredLayout(nodes, edges);
   }
 
-  for (const node of nodes) {
-    if (node.id === selectedNodeId) {
-      targetNode = node;
-    } else if (incomingIds.has(node.id)) {
-      inCallers.push(node);
-    } else if (outgoingIds.has(node.id)) {
-      outCallees.push(node);
+  const inNodes: VisualGraphNode[] = [];
+  const outNodes: VisualGraphNode[] = [];
+  const otherNodes: VisualGraphNode[] = [];
+
+  const inSet = new Set<string>();
+  const outSet = new Set<string>();
+
+  for (const e of edges) {
+    if (e.target === selectedNodeId && e.source !== selectedNodeId) {
+      inSet.add(e.source);
+    }
+    if (e.source === selectedNodeId && e.target !== selectedNodeId) {
+      outSet.add(e.target);
+    }
+  }
+
+  for (const n of nodes) {
+    if (n.id === selectedNodeId) continue;
+    if (inSet.has(n.id)) {
+      inNodes.push(n);
+    } else if (outSet.has(n.id)) {
+      outNodes.push(n);
     } else {
-      otherNodes.push(node);
+      otherNodes.push(n);
     }
   }
 
   const positionedNodes: PositionedNode[] = [];
-  const nodeWidth = 280;
-  const nodeHeight = 150;
-  const gapY = 40;
+  const nodeWidth = 290;
+  const nodeHeight = 130;
+  const gapY = 30;
 
-  // Center column X
-  const centerX = 550;
-  const leftX = 80;
-  const rightX = 1020;
+  // Selected Node at Center
+  const centerX = 500;
+  const centerY = Math.max(inNodes.length, outNodes.length) * (nodeHeight + gapY) / 2 + 50;
+  positionedNodes.push({ ...selectedNode, x: centerX, y: Math.max(centerY, 100) });
 
-  // Target Node at Center
-  const centerY = Math.max(160, Math.max(inCallers.length, outCallees.length) * 80);
-  if (targetNode) {
-    positionedNodes.push({ ...targetNode, x: centerX, y: centerY });
-  }
-
-  // Left Column (Callers / Inbound)
-  const leftStartY = Math.max(50, centerY - (inCallers.length * (nodeHeight + gapY)) / 2 + 50);
-  inCallers.forEach((node, i) => {
-    positionedNodes.push({
-      ...node,
-      x: leftX,
-      y: leftStartY + i * (nodeHeight + gapY),
-    });
+  // Inbound Callers on Left (x = 80)
+  inNodes.forEach((n, idx) => {
+    positionedNodes.push({ ...n, x: 80, y: 50 + idx * (nodeHeight + gapY) });
   });
 
-  // Right Column (Callees / Outbound)
-  const rightStartY = Math.max(50, centerY - (outCallees.length * (nodeHeight + gapY)) / 2 + 50);
-  outCallees.forEach((node, i) => {
-    positionedNodes.push({
-      ...node,
-      x: rightX,
-      y: rightStartY + i * (nodeHeight + gapY),
-    });
+  // Outbound Callees on Right (x = 920)
+  outNodes.forEach((n, idx) => {
+    positionedNodes.push({ ...n, x: 920, y: 50 + idx * (nodeHeight + gapY) });
   });
 
-  // Other secondary nodes at bottom in a grid
-  const bottomY = Math.max(centerY + 300, Math.max(leftStartY + inCallers.length * 190, rightStartY + outCallees.length * 190) + 80);
-  const otherCols = 4;
-  otherNodes.forEach((node, i) => {
-    const col = i % otherCols;
-    const row = Math.floor(i / otherCols);
-    positionedNodes.push({
-      ...node,
-      x: 80 + col * (nodeWidth + 40),
-      y: bottomY + row * (nodeHeight + 30),
-    });
+  // Other unselected nodes placed below
+  let otherStartY = Math.max(centerY * 2, (inNodes.length + 1) * (nodeHeight + gapY)) + 100;
+  otherNodes.forEach((n, idx) => {
+    const col = idx % 4;
+    const row = Math.floor(idx / 4);
+    positionedNodes.push({ ...n, x: 80 + col * (nodeWidth + 40), y: otherStartY + row * (nodeHeight + gapY) });
   });
 
-  const swimlanes: SwimlaneInfo[] = [
-    { label: `INBOUND CALLERS (${inCallers.length})`, y: 10, height: bottomY - 30, color: 'rgba(56, 189, 248, 0.03)' },
-    { label: `SELECTED TARGET`, y: 10, height: bottomY - 30, color: 'rgba(56, 189, 248, 0.07)' },
-    { label: `OUTBOUND DEPENDENCIES (${outCallees.length})`, y: 10, height: bottomY - 30, color: 'rgba(251, 146, 60, 0.03)' },
-  ];
-
-  return { nodes: positionedNodes, swimlanes };
+  return { nodes: positionedNodes, swimlanes: [] };
 }
 
 /**
- * 4. STANDARD GRID LAYOUT
+ * 4. CLEAN COMPACT GRID LAYOUT
  */
 function calculateGridLayout(nodes: VisualGraphNode[]): LayoutResult {
-  const cols = Math.max(2, Math.ceil(Math.sqrt(nodes.length * 1.5)));
-  const colSpacing = 340;
-  const rowSpacing = 190;
+  const positionedNodes: PositionedNode[] = [];
+  const cols = 4;
+  const nodeWidth = 290;
+  const nodeHeight = 130;
+  const gapX = 45;
+  const gapY = 40;
 
-  const positionedNodes = nodes.map((node, index) => {
-    const col = index % cols;
-    const row = Math.floor(index / cols);
-    const xOffset = (row % 2) * 40;
-    return {
+  nodes.forEach((node, idx) => {
+    const col = idx % cols;
+    const row = Math.floor(idx / cols);
+    positionedNodes.push({
       ...node,
-      x: col * colSpacing + xOffset + 60,
-      y: row * rowSpacing + 60,
-    };
+      x: 60 + col * (nodeWidth + gapX),
+      y: 60 + row * (nodeHeight + gapY),
+    });
   });
 
   return { nodes: positionedNodes, swimlanes: [] };
 }
 
 function determineLayerFromNode(node: VisualGraphNode): ArchitectureLayer {
-  const sub = node.sub_label || '';
-  const label = node.label || '';
-  const group = node.group || '';
+  const lbl = node.label.toLowerCase();
+  const sub = (node.sub_label || '').toLowerCase();
+  const grp = (node.group || '').toLowerCase();
 
-  if (sub.includes('Controller') || group.includes('controller') || label.endsWith('Controller')) {
+  if (sub.includes('controller') || grp.includes('controller') || grp.includes('web') || lbl.endsWith('controller')) {
     return 'UI';
   }
-  if (sub.includes('Service') || group.includes('service') || label.endsWith('Service') || label.endsWith('UseCase')) {
+  if (sub.includes('service') || grp.includes('service') || lbl.endsWith('service') || lbl.endsWith('usecase')) {
     return 'Service';
   }
-  if (sub.includes('Repository') || group.includes('repository') || group.includes('dao') || label.endsWith('Repository') || label.endsWith('Dao')) {
+  if (sub.includes('repository') || grp.includes('repository') || grp.includes('dao') || lbl.endsWith('repository') || lbl.endsWith('dao')) {
     return 'Infrastructure';
   }
-  if (sub.includes('Entity') || group.includes('model') || group.includes('domain') || group.includes('entity') || label.endsWith('Entity') || label.endsWith('Dto')) {
+  if (sub.includes('entity') || grp.includes('model') || grp.includes('domain') || lbl.endsWith('entity') || lbl.endsWith('dto')) {
     return 'Domain';
   }
   return 'Unknown';
