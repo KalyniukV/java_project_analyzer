@@ -43,6 +43,7 @@ pub struct GwtRpcServiceMapping {
 
 pub struct NativeJavaScanner {
     pkg_regex: Regex,
+    import_regex: Regex,
     class_regex: Regex,
     field_regex: Regex,
     method_regex: Regex,
@@ -67,6 +68,7 @@ impl NativeJavaScanner {
     pub fn new() -> Self {
         Self {
             pkg_regex: Regex::new(r"package\s+([a-zA-Z0-9_.]+)\s*;").unwrap(),
+            import_regex: Regex::new(r"import\s+(?:static\s+)?([a-zA-Z0-9_.]+)\s*;").unwrap(),
             class_regex: Regex::new(
                 r"(?m)(?:public|protected|private|static|final|abstract|\s)*\b(class|interface|enum|record|@interface)\s+([a-zA-Z0-9_]+)(?:<[^>]+>)?(?:\s+extends\s+([a-zA-Z0-9_.]+)(?:<[^>]+>)?)?(?:\s+implements\s+([a-zA-Z0-9_., <>]+))?",
             )
@@ -932,6 +934,16 @@ impl NativeJavaScanner {
             }
         }
 
+        // Extract imports
+        let mut imports: HashMap<String, String> = HashMap::new();
+        for imp_cap in self.import_regex.captures_iter(&content) {
+            if let Some(imp) = imp_cap.get(1) {
+                let fqcn_str = imp.as_str().trim();
+                let simple_name = fqcn_str.split('.').last().unwrap_or(fqcn_str);
+                imports.insert(simple_name.to_string(), fqcn_str.to_string());
+            }
+        }
+
         // Extract classes declared in file
         let mut results = Vec::new();
         for cap in self.class_regex.captures_iter(&content) {
@@ -983,10 +995,11 @@ impl NativeJavaScanner {
 
             // Extract fields
             let mut fields = Vec::new();
+            let mut field_type_map: HashMap<String, String> = HashMap::new();
             for f_cap in self.field_regex.captures_iter(&content) {
                 let ann = f_cap.get(1).map(|m| m.as_str().to_string());
                 let vis = f_cap.get(2).map(|m| m.as_str()).unwrap_or("package").to_string();
-                let type_name = f_cap.get(3).map(|m| m.as_str()).unwrap_or("").to_string();
+                let type_name = f_cap.get(3).map(|m| m.as_str().split('<').next().unwrap_or("").trim().to_string()).unwrap_or_default();
                 let f_name = f_cap.get(4).map(|m| m.as_str()).unwrap_or("").to_string();
                 let is_static = content.contains(&format!("static {} {}", type_name, f_name))
                     || content.contains(&format!("static final {} {}", type_name, f_name));
@@ -1002,6 +1015,7 @@ impl NativeJavaScanner {
                 }
 
                 if !type_name.is_empty() && !f_name.is_empty() {
+                    field_type_map.insert(f_name.clone(), type_name.clone());
                     fields.push(FieldInfo {
                         id: format!("{}#{}", fqcn, f_name),
                         name: f_name,
@@ -1016,7 +1030,10 @@ impl NativeJavaScanner {
 
             // Extract methods and parse detailed parameters and bodies
             let mut methods = Vec::new();
-            for m_cap in self.method_regex.captures_iter(&content) {
+            let method_matches: Vec<_> = self.method_regex.captures_iter(&content).collect();
+            let local_var_regex = Regex::new(r"\b([A-Z][a-zA-Z0-9_<>]+)\s+([a-zA-Z0-9_]+)\s*=").unwrap();
+
+            for (idx, m_cap) in method_matches.iter().enumerate() {
                 let ann = m_cap.get(1).map(|m| m.as_str().to_string());
                 let vis = m_cap.get(2).map(|m| m.as_str()).unwrap_or("public").to_string();
                 let ret_type = m_cap.get(3).map(|m| m.as_str()).unwrap_or("void").to_string();
@@ -1031,12 +1048,13 @@ impl NativeJavaScanner {
 
                 // Detailed parameters extraction
                 let mut parameters = Vec::new();
+                let mut param_type_map: HashMap<String, String> = HashMap::new();
                 for param_str in params_raw.split(',') {
                     let p_trimmed = param_str.trim();
                     if !p_trimmed.is_empty() {
                         let parts: Vec<&str> = p_trimmed.split_whitespace().collect();
                         if parts.len() >= 2 {
-                            let p_type = parts[parts.len() - 2].to_string();
+                            let p_type = parts[parts.len() - 2].split('<').next().unwrap_or(parts[parts.len() - 2]).to_string();
                             let p_name = parts[parts.len() - 1].to_string();
                             let mut p_anns = Vec::new();
                             for part in &parts[..parts.len() - 2] {
@@ -1044,15 +1062,18 @@ impl NativeJavaScanner {
                                     p_anns.push(part.trim_start_matches('@').to_string());
                                 }
                             }
+                            param_type_map.insert(p_name.clone(), p_type.clone());
                             parameters.push(ParameterInfo {
                                 name: p_name,
                                 type_name: p_type,
                                 annotations: p_anns,
                             });
                         } else if parts.len() == 1 {
+                            let p_type = parts[0].split('<').next().unwrap_or(parts[0]).to_string();
+                            param_type_map.insert("arg".to_string(), p_type.clone());
                             parameters.push(ParameterInfo {
                                 name: "arg".to_string(),
-                                type_name: parts[0].to_string(),
+                                type_name: p_type,
                                 annotations: Vec::new(),
                             });
                         }
@@ -1062,25 +1083,66 @@ impl NativeJavaScanner {
                 let param_types_summary = parameters.iter().map(|p| p.type_name.clone()).collect::<Vec<_>>().join(", ");
                 let method_id = format!("{}#{}({})", fqcn, m_name, param_types_summary);
 
+                // Extract method body slice (from header end to next method or next 4000 chars)
+                let start_pos = m_cap.get(0).map(|m| m.end()).unwrap_or(0);
+                let end_pos = if idx + 1 < method_matches.len() {
+                    method_matches[idx + 1].get(0).map(|m| m.start()).unwrap_or(content.len())
+                } else {
+                    content.len()
+                };
+
+                let body_slice = if start_pos < end_pos && end_pos <= content.len() {
+                    &content[start_pos..end_pos]
+                } else {
+                    ""
+                };
+
+                // Extract local variables inside method body
+                let mut local_vars: HashMap<String, String> = HashMap::new();
+                for lv_cap in local_var_regex.captures_iter(body_slice) {
+                    if let (Some(t), Some(n)) = (lv_cap.get(1), lv_cap.get(2)) {
+                        let clean_t = t.as_str().split('<').next().unwrap_or(t.as_str()).trim();
+                        local_vars.insert(n.as_str().to_string(), clean_t.to_string());
+                    }
+                }
+
                 // Method body call & field analysis
                 let mut called_methods = Vec::new();
                 let mut used_fields = Vec::new();
 
-                // Scan content for calls made by this class/method
-                for call_cap in self.method_call_regex.captures_iter(&content) {
+                for call_cap in self.method_call_regex.captures_iter(body_slice) {
                     let receiver = call_cap.get(1).map(|m| m.as_str().to_string());
                     let called_name = call_cap.get(2).map(|m| m.as_str().to_string()).unwrap_or_default();
 
                     if !called_name.is_empty() && called_name != m_name && !["if", "for", "while", "switch", "println", "print", "equals", "toString", "hashCode"].contains(&called_name.as_str()) {
                         if let Some(rec) = receiver {
-                            // If receiver matches a field, record field call
-                            if let Some(f) = fields.iter().find(|f| f.name == rec) {
-                                let target_call = format!("{}#{}", f.type_name, called_name);
+                            if rec == "this" {
+                                let target_call = format!("{}#{}", fqcn, called_name);
                                 if !called_methods.contains(&target_call) {
                                     called_methods.push(target_call);
                                 }
-                                if !used_fields.contains(&f.name) {
-                                    used_fields.push(f.name.clone());
+                            } else if let Some(var_type) = local_vars.get(&rec) {
+                                let target_call = format!("{}#{}", var_type, called_name);
+                                if !called_methods.contains(&target_call) {
+                                    called_methods.push(target_call);
+                                }
+                            } else if let Some(param_type) = param_type_map.get(&rec) {
+                                let target_call = format!("{}#{}", param_type, called_name);
+                                if !called_methods.contains(&target_call) {
+                                    called_methods.push(target_call);
+                                }
+                            } else if let Some(field_type) = field_type_map.get(&rec) {
+                                let target_call = format!("{}#{}", field_type, called_name);
+                                if !called_methods.contains(&target_call) {
+                                    called_methods.push(target_call);
+                                }
+                                if !used_fields.contains(&rec) {
+                                    used_fields.push(rec);
+                                }
+                            } else if let Some(imp_fqcn) = imports.get(&rec) {
+                                let target_call = format!("{}#{}", imp_fqcn, called_name);
+                                if !called_methods.contains(&target_call) {
+                                    called_methods.push(target_call);
                                 }
                             } else {
                                 let target_call = format!("{}#{}", rec, called_name);
@@ -1089,16 +1151,18 @@ impl NativeJavaScanner {
                                 }
                             }
                         } else {
-                            if !called_methods.contains(&called_name) {
-                                called_methods.push(called_name);
+                            // Direct call without receiver
+                            let target_call = format!("{}#{}", fqcn, called_name);
+                            if !called_methods.contains(&target_call) {
+                                called_methods.push(target_call);
                             }
                         }
                     }
                 }
 
-                // Check field usages
+                // Check field usages in this method
                 for f in &fields {
-                    if content.contains(&format!("{}.{}", f.name, "")) || content.contains(&format!("this.{}", f.name)) || content.contains(&format!("{} =", f.name)) {
+                    if body_slice.contains(&format!("{}.", f.name)) || body_slice.contains(&format!("this.{}", f.name)) || body_slice.contains(&format!("{} =", f.name)) {
                         if !used_fields.contains(&f.name) {
                             used_fields.push(f.name.clone());
                         }

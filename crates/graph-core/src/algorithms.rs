@@ -1153,18 +1153,43 @@ impl GraphAnalyzer {
             }
 
             let next_depth = curr_d + 1;
-            let clean_curr = curr_name.split('(').next().unwrap_or(&curr_name).trim();
+            let clean_curr_method = curr_name.split('(').next().unwrap_or(&curr_name).trim();
+
+            // Find the declaring class of curr_id
+            let curr_target_class_id = if curr_id.contains('#') {
+                curr_id.split('#').next().unwrap_or("").to_string()
+            } else {
+                "".to_string()
+            };
+            let curr_target_class_simple = curr_target_class_id.split('.').last().unwrap_or(&curr_target_class_id).to_string();
 
             for cls in &self.model.classes {
+                let is_same_class = cls.id == curr_target_class_id;
+                let has_field_of_type = cls.fields.iter().any(|f| f.type_name == curr_target_class_simple || f.type_name == curr_target_class_id);
+                let has_ref = cls.referenced_types.iter().any(|r| r == &curr_target_class_simple || r == &curr_target_class_id);
+
                 for m in &cls.methods {
                     if m.id == curr_id {
                         continue;
                     }
 
                     let calls_curr = m.called_methods.iter().any(|cm| {
-                        cm == &curr_id || cm.ends_with(&format!("#{}", clean_curr)) || cm == clean_curr
+                        // 1. Exact match (FQCN#method or ID)
+                        if cm == &curr_id || cm == &format!("{}#{}", curr_target_class_id, clean_curr_method) {
+                            return true;
+                        }
+                        // 2. Simple class name match (e.g. OwnerRepository#save)
+                        if !curr_target_class_simple.is_empty() && cm == &format!("{}#{}", curr_target_class_simple, clean_curr_method) {
+                            return is_same_class || has_field_of_type || has_ref || m.parameters.iter().any(|p| p.type_name == curr_target_class_simple);
+                        }
+                        // 3. Same class internal call (this.method)
+                        if is_same_class && (cm == clean_curr_method || cm.ends_with(&format!("#{}", clean_curr_method))) {
+                            return true;
+                        }
+                        false
                     });
-                    let uses_curr_field = m.used_fields.iter().any(|uf| uf == clean_curr);
+
+                    let uses_curr_field = is_same_class && m.used_fields.iter().any(|uf| uf == clean_curr_method);
 
                     if calls_curr || uses_curr_field {
                         let caller_node_id = m.id.clone();
@@ -1240,8 +1265,11 @@ impl GraphAnalyzer {
                     let clean_callee_name = called_m_name.split('(').next().unwrap_or(called_m_name).trim();
 
                     for target_cls in &self.model.classes {
-                        if !called_cls_name.is_empty() && target_cls.name != called_cls_name && target_cls.id != called_cls_name {
-                            continue;
+                        if !called_cls_name.is_empty() {
+                            let matches_cls = target_cls.id == called_cls_name || target_cls.name == called_cls_name || target_cls.id.ends_with(&format!(".{}", called_cls_name));
+                            if !matches_cls {
+                                continue;
+                            }
                         }
 
                         if let Some(target_m) = target_cls.methods.iter().find(|tm| tm.name == clean_callee_name || tm.id == *called_ref) {
