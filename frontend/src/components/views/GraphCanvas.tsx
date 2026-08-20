@@ -1,35 +1,33 @@
-import React, { useMemo, useState } from 'react';
-import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  MarkerType,
-  BackgroundVariant,
-  Node,
-  Edge,
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import { CustomGraphNode } from '../graph/CustomNodes';
-import { CustomGraphEdge } from '../graph/CustomEdges';
-import { VisualGraphPayload, VisualGraphNode, VisualGraphEdge } from '../../types';
-import { calculateLayout, LayoutMode } from '../../utils/layout';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
+import cytoscape, { Core, EventObject } from 'cytoscape';
+// @ts-ignore
+import dagre from 'cytoscape-dagre';
+// @ts-ignore
+import fcose from 'cytoscape-fcose';
+import { VisualGraphPayload } from '../../types';
 import {
   Layers,
   Box,
-  Target,
   Grid,
   Filter,
   Eye,
   EyeOff,
-  Sparkles,
   Maximize2,
   Folder,
-  X,
   Globe,
   ChevronRight,
-  Home
+  Home,
+  ZoomIn,
+  ZoomOut
 } from 'lucide-react';
+
+// Register layout extensions safely
+try {
+  cytoscape.use(dagre);
+} catch {}
+try {
+  cytoscape.use(fcose);
+} catch {}
 
 interface GraphCanvasProps {
   graphData: VisualGraphPayload | null;
@@ -47,14 +45,6 @@ interface GraphCanvasProps {
   onNavigateView?: (view: 'modules' | 'packages' | 'classes') => void;
 }
 
-const nodeTypes = {
-  customNode: CustomGraphNode as any,
-};
-
-const edgeTypes = {
-  customEdge: CustomGraphEdge as any,
-};
-
 export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   graphData,
   selectedNodeId,
@@ -63,133 +53,471 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   activeView,
   selectedModules = [],
   selectedPackages = [],
-  onClearModuleFilter,
-  onClearPackageFilter,
   includeExternal = false,
   onToggleIncludeExternal,
   onDrillDown,
   onNavigateView,
 }) => {
-  const [layoutMode, setLayoutMode] = useState<LayoutMode>('layered');
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cyRef = useRef<Core | null>(null);
+
+  const [layoutMode, setLayoutMode] = useState<'dagre' | 'fcose' | 'grid' | 'concentric'>('dagre');
   const [hideDTOs, setHideDTOs] = useState<boolean>(false);
   const [onlyActiveEdges, setOnlyActiveEdges] = useState<boolean>(true);
 
-  const { nodes, edges, swimlanes } = useMemo(() => {
-    if (!graphData) return { nodes: [], edges: [], swimlanes: [] };
+  // -------------------------------------------------------------
+  // Filter nodes & edges
+  // -------------------------------------------------------------
+  const { filteredNodes, filteredEdges } = useMemo(() => {
+    if (!graphData) return { filteredNodes: [], filteredEdges: [] };
 
-    // 1. Calculate positions using our anti-confusion layout engine
-    const layout = calculateLayout(
-      graphData.nodes,
-      graphData.edges,
-      layoutMode,
-      selectedNodeId,
-      hideDTOs
-    );
-
-    const activeNodeIds = new Set(layout.nodes.map((n) => n.id));
-
-    // 2. Map positioned nodes to React Flow nodes
-    const rfNodes: Node[] = layout.nodes.map((node) => ({
-      id: node.id,
-      type: 'customNode',
-      position: {
-        x: node.x,
-        y: node.y,
-      },
-      data: { ...node },
-      selected: node.id === selectedNodeId,
-    }));
-
-    // 3. Map edges with decluttering & active isolation
-    let rawEdges = graphData.edges.filter((edge) => activeNodeIds.has(edge.source) && activeNodeIds.has(edge.target));
-
-    if (onlyActiveEdges && selectedNodeId) {
-      rawEdges = rawEdges.filter((edge) => edge.highlight_state !== 'Dimmed' && edge.highlight_state !== 'Normal');
-    } else if (rawEdges.length > 150 && !selectedNodeId) {
-      // Smart edge capping: prioritize circular & inter-module edges
-      const priorityEdges = rawEdges.filter(e => e.is_circular || e.kind === 'ModuleDependency' || e.kind === 'PackageDependency');
-      rawEdges = priorityEdges.length > 0 ? priorityEdges.slice(0, 120) : rawEdges.slice(0, 100);
+    let nodes = graphData.nodes;
+    if (hideDTOs) {
+      nodes = nodes.filter((n) => {
+        const name = n.label || '';
+        return !name.endsWith('Dto') && !name.endsWith('DTO') && !name.endsWith('VO') && n.category !== 'dto';
+      });
     }
 
-    const rfEdges: Edge[] = rawEdges.map((edge: VisualGraphEdge) => {
-      const isHighlighted = edge.highlight_state !== 'Normal' && edge.highlight_state !== 'Dimmed';
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const edges = graphData.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-      let markerColor = '#475569';
-      if (edge.highlight_state === 'InboundActive') {
-        markerColor = '#38bdf8';
-      } else if (edge.highlight_state === 'OutboundActive') {
-        markerColor = '#fb923c';
-      } else if (edge.is_circular) {
-        markerColor = '#ef4444';
-      }
+    return { filteredNodes: nodes, filteredEdges: edges };
+  }, [graphData, hideDTOs]);
 
-      return {
-        id: edge.id,
-        source: edge.source,
-        target: edge.target,
-        type: 'customEdge',
-        data: { ...edge },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          width: isHighlighted ? 14 : 10,
-          height: isHighlighted ? 14 : 10,
-          color: markerColor,
-        },
-        animated: false,
+  // -------------------------------------------------------------
+  // Run layout algorithm
+  // -------------------------------------------------------------
+  const runLayout = (cy: Core, mode: string) => {
+    let layoutOptions: any;
+
+    if (mode === 'dagre') {
+      layoutOptions = {
+        name: 'dagre',
+        rankDir: 'TB',
+        nodeSep: 60,
+        rankSep: 80,
+        edgeSep: 30,
+        animate: true,
+        animationDuration: 350,
+        fit: true,
+        padding: 50,
       };
+    } else if (mode === 'fcose') {
+      layoutOptions = {
+        name: 'fcose',
+        quality: 'proof',
+        randomize: false,
+        animate: true,
+        animationDuration: 350,
+        fit: true,
+        padding: 50,
+        nodeSeparation: 80,
+        idealEdgeLength: 120,
+      };
+    } else if (mode === 'grid') {
+      layoutOptions = {
+        name: 'grid',
+        fit: true,
+        padding: 50,
+        animate: true,
+        animationDuration: 300,
+      };
+    } else {
+      layoutOptions = {
+        name: 'concentric',
+        fit: true,
+        padding: 50,
+        animate: true,
+        animationDuration: 300,
+      };
+    }
+
+    try {
+      const l = cy.layout(layoutOptions);
+      l.run();
+    } catch (e) {
+      const fallback = cy.layout({ name: 'grid', fit: true, padding: 50 });
+      fallback.run();
+    }
+  };
+
+  // -------------------------------------------------------------
+  // Initialize and update Cytoscape instance
+  // -------------------------------------------------------------
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    // Transform to Cytoscape elements
+    const elements: cytoscape.ElementDefinition[] = [];
+
+    // Nodes
+    for (const node of filteredNodes) {
+      const category = (node.category || '').toLowerCase();
+      const layer = (node.layer || '').toLowerCase();
+      const isInterface = category === 'interface';
+      const isModule = node.category === 'module' || activeView === 'modules';
+      const isPackage = node.category === 'package' || activeView === 'packages';
+
+      elements.push({
+        group: 'nodes',
+        data: {
+          id: node.id,
+          label: node.label,
+          category: category,
+          layer: layer,
+          degreeIn: node.degree_in || 0,
+          degreeOut: node.degree_out || 0,
+          isInterface: isInterface ? 'true' : 'false',
+          isModule: isModule ? 'true' : 'false',
+          isPackage: isPackage ? 'true' : 'false',
+        },
+      });
+    }
+
+    // Edges
+    for (const edge of filteredEdges) {
+      elements.push({
+        group: 'edges',
+        data: {
+          id: edge.id,
+          source: edge.source,
+          target: edge.target,
+          label: edge.label || '',
+          kind: edge.kind || '',
+          isCircular: edge.is_circular ? 'true' : 'false',
+        },
+      });
+    }
+
+    // High-Contrast Dark Theme Stylesheet for Cytoscape
+    const cy = cytoscape({
+      container: containerRef.current,
+      elements: elements,
+      boxSelectionEnabled: false,
+      autounselectify: false,
+      minZoom: 0.08,
+      maxZoom: 4.0,
+      wheelSensitivity: 0.25,
+      style: [
+        // BASE NODE STYLING
+        {
+          selector: 'node',
+          style: {
+            'shape': 'round-rectangle',
+            'width': '190px',
+            'height': '52px',
+            'background-color': '#161b22',
+            'border-width': '2px',
+            'border-color': '#30363d',
+            'border-opacity': 1,
+            'corner-radius': '10px',
+            'label': 'data(label)',
+            'color': '#ffffff',
+            'font-family': 'JetBrains Mono, Fira Code, monospace',
+            'font-size': '12px',
+            'font-weight': 'bold',
+            'text-valign': 'center',
+            'text-halign': 'center',
+            'text-wrap': 'ellipsis',
+            'text-max-width': '170px',
+            'text-outline-color': '#0d1117',
+            'text-outline-width': '2px',
+            'transition-property': 'background-color, border-color, border-width, opacity',
+            'transition-duration': 0.2,
+          } as any,
+        },
+        // Controllers / UI Layer
+        {
+          selector: 'node[layer = "ui"], node[category = "controller"]',
+          style: {
+            'background-color': '#881337',
+            'border-color': '#f43f5e',
+          },
+        },
+        // Service Layer
+        {
+          selector: 'node[layer = "service"], node[category = "service"]',
+          style: {
+            'background-color': '#1e3a8a',
+            'border-color': '#60a5fa',
+          },
+        },
+        // Repository / Data Layer
+        {
+          selector: 'node[layer = "repository"], node[category = "repository"], node[category = "dao"]',
+          style: {
+            'background-color': '#064e3b',
+            'border-color': '#34d399',
+          },
+        },
+        // Interfaces
+        {
+          selector: 'node[isInterface = "true"]',
+          style: {
+            'background-color': '#0c4a6e',
+            'border-color': '#38bdf8',
+            'border-style': 'dashed',
+          },
+        },
+        // Packages
+        {
+          selector: 'node[isPackage = "true"]',
+          style: {
+            'background-color': '#3b0764',
+            'border-color': '#c084fc',
+            'width': '210px',
+            'height': '56px',
+          },
+        },
+        // Modules
+        {
+          selector: 'node[isModule = "true"]',
+          style: {
+            'background-color': '#022c22',
+            'border-color': '#10b981',
+            'width': '230px',
+            'height': '60px',
+            'font-size': '13px',
+          },
+        },
+        // SELECTED NODE STYLING
+        {
+          selector: 'node:selected, node.selected',
+          style: {
+            'border-color': '#a855f7',
+            'border-width': '4px',
+            'background-color': '#2e1065',
+            'shadow-blur': 15,
+            'shadow-color': '#a855f7',
+            'shadow-opacity': 0.8,
+            'z-index': 999,
+          } as any,
+        },
+        // Dimmed when another node is selected in active mode
+        {
+          selector: 'node.dimmed',
+          style: {
+            'opacity': 0.15,
+          },
+        },
+        // Connected Neighbor Nodes
+        {
+          selector: 'node.highlighted',
+          style: {
+            'border-color': '#38bdf8',
+            'border-width': '3px',
+            'opacity': 1,
+            'z-index': 500,
+          },
+        },
+
+        // BASE EDGE STYLING
+        {
+          selector: 'edge',
+          style: {
+            'width': 2,
+            'line-color': '#475569',
+            'curve-style': 'bezier',
+            'target-arrow-shape': 'triangle-backcurve',
+            'target-arrow-color': '#475569',
+            'arrow-scale': 1.2,
+            'opacity': 0.65,
+            'transition-property': 'line-color, target-arrow-color, width, opacity',
+            'transition-duration': 0.2,
+          } as any,
+        },
+        // Extends / Implements
+        {
+          selector: 'edge[kind = "Extends"], edge[kind = "Implements"]',
+          style: {
+            'line-color': '#38bdf8',
+            'target-arrow-color': '#38bdf8',
+            'line-style': 'dashed',
+            'width': 2.5,
+          },
+        },
+        // Field / Autowired
+        {
+          selector: 'edge[kind = "FieldDependency"]',
+          style: {
+            'line-color': '#ec4899',
+            'target-arrow-color': '#ec4899',
+            'width': 2.5,
+          },
+        },
+        // Method Call
+        {
+          selector: 'edge[kind = "MethodCall"]',
+          style: {
+            'line-color': '#a855f7',
+            'target-arrow-color': '#a855f7',
+            'width': 2,
+          },
+        },
+        // GWT RPC
+        {
+          selector: 'edge[kind = "GwtRpcBinding"]',
+          style: {
+            'line-color': '#fbbf24',
+            'target-arrow-color': '#fbbf24',
+            'width': 2.5,
+          },
+        },
+        // Circular Edges
+        {
+          selector: 'edge[isCircular = "true"]',
+          style: {
+            'line-color': '#ef4444',
+            'target-arrow-color': '#ef4444',
+            'width': 3,
+            'opacity': 0.9,
+          },
+        },
+        // Active Highlighted Edge
+        {
+          selector: 'edge.highlighted',
+          style: {
+            'width': 3.5,
+            'opacity': 1,
+            'line-color': '#38bdf8',
+            'target-arrow-color': '#38bdf8',
+            'z-index': 800,
+          },
+        },
+        // Dimmed Edge
+        {
+          selector: 'edge.dimmed',
+          style: {
+            'opacity': 0.05,
+          },
+        },
+      ],
     });
 
-    return { nodes: rfNodes, edges: rfEdges, swimlanes: layout.swimlanes };
-  }, [graphData, selectedNodeId, layoutMode, hideDTOs, onlyActiveEdges]);
+    // Event Handlers
+    cy.on('tap', 'node', (evt: EventObject) => {
+      const node = evt.target;
+      onSelectNode(node.id());
+    });
 
-  // Handle double click for drill-down
-  const handleNodeDoubleClick = (_: React.MouseEvent, node: Node) => {
-    const nodeData = node.data as any;
-    if (nodeData.category === 'module' && onDrillDown) {
-      onDrillDown(node.id, 'packages');
-    } else if (nodeData.category === 'package' && onDrillDown) {
-      onDrillDown(node.id, 'classes');
+    cy.on('dbltap', 'node', (evt: EventObject) => {
+      const node = evt.target;
+      const id = node.id();
+      if (activeView === 'modules') {
+        if (onDrillDown) onDrillDown(id, 'packages');
+      } else if (activeView === 'packages') {
+        if (onDrillDown) onDrillDown(id, 'classes');
+      }
+    });
+
+    cy.on('tap', (evt: EventObject) => {
+      if (evt.target === cy) {
+        onCanvasClick();
+      }
+    });
+
+    cyRef.current = cy;
+
+    runLayout(cy, layoutMode);
+
+    return () => {
+      cy.destroy();
+    };
+  }, [filteredNodes, filteredEdges, activeView]);
+
+  // -------------------------------------------------------------
+  // Handle Highlight and Active Node Changes
+  // -------------------------------------------------------------
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+
+    cy.batch(() => {
+      cy.elements().removeClass('selected highlighted dimmed');
+
+      if (selectedNodeId) {
+        const selectedNode = cy.getElementById(selectedNodeId);
+        if (selectedNode.length > 0) {
+          selectedNode.addClass('selected');
+
+          if (onlyActiveEdges) {
+            const connectedEdges = selectedNode.connectedEdges();
+            const neighbors = connectedEdges.connectedNodes();
+
+            cy.elements().addClass('dimmed');
+            selectedNode.removeClass('dimmed');
+            neighbors.removeClass('dimmed').addClass('highlighted');
+            connectedEdges.removeClass('dimmed').addClass('highlighted');
+          }
+        }
+      }
+    });
+  }, [selectedNodeId, onlyActiveEdges]);
+
+  // Switch layout mode
+  const handleLayoutChange = (mode: 'dagre' | 'fcose' | 'grid' | 'concentric') => {
+    setLayoutMode(mode);
+    if (cyRef.current) {
+      runLayout(cyRef.current, mode);
+    }
+  };
+
+  // Fit to screen
+  const handleFit = () => {
+    if (cyRef.current) {
+      cyRef.current.animate({
+        fit: {
+          eles: cyRef.current.elements(),
+          padding: 50,
+        },
+        duration: 350,
+      });
+    }
+  };
+
+  // Zoom In / Out
+  const handleZoomIn = () => {
+    if (cyRef.current && containerRef.current) {
+      cyRef.current.zoom({
+        level: cyRef.current.zoom() * 1.3,
+        renderedPosition: {
+          x: containerRef.current.clientWidth / 2,
+          y: containerRef.current.clientHeight / 2,
+        },
+      });
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (cyRef.current && containerRef.current) {
+      cyRef.current.zoom({
+        level: cyRef.current.zoom() * 0.75,
+        renderedPosition: {
+          x: containerRef.current.clientWidth / 2,
+          y: containerRef.current.clientHeight / 2,
+        },
+      });
     }
   };
 
   return (
-    <div className="w-full h-full relative bg-[#0d1117]">
-      {/* Visual Swimlane Background Labels for Layered / Clustered Mode */}
-      {layoutMode === 'layered' && swimlanes.length > 0 && (
-        <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden opacity-40">
-          {swimlanes.map((lane, idx) => (
-            <div
-              key={idx}
-              style={{
-                position: 'absolute',
-                top: `${lane.y}px`,
-                left: '20px',
-                right: '20px',
-                height: `${lane.height}px`,
-                backgroundColor: lane.color,
-                border: '1px dashed rgba(255, 255, 255, 0.07)',
-                borderRadius: '24px',
-              }}
-            >
-              <span className="absolute -top-3 left-6 px-3 py-0.5 rounded-md bg-[#161b22] border border-[#30363d] text-[10px] font-mono font-bold tracking-widest text-slate-400 uppercase shadow">
-                {lane.label}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+    <div className="relative w-full h-full bg-[#0d1117] overflow-hidden select-none">
+      {/* CYTOSCAPE HTML5 CANVAS CONTAINER */}
+      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
-      {/* Top Floating Breadcrumb Bar */}
-      <div className="absolute top-4 left-4 z-20 flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1.5 bg-[#161b22]/95 border border-[#30363d] px-3 py-1.5 rounded-xl shadow-2xl backdrop-blur-md text-xs font-mono">
+      {/* TOP FLOATING BAR (Breadcrumbs & Layout Controls) */}
+      <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20 gap-3">
+        {/* Breadcrumb Navigation */}
+        <div className="flex items-center gap-1.5 bg-[#161b22]/95 border border-[#30363d] px-3 py-1.5 rounded-xl shadow-2xl backdrop-blur-md pointer-events-auto text-xs font-mono">
           <button
             onClick={() => onNavigateView && onNavigateView('modules')}
-            className={`flex items-center gap-1 hover:text-sky-300 transition ${
+            className={`flex items-center gap-1 hover:text-white transition ${
               activeView === 'modules' ? 'text-sky-400 font-bold' : 'text-slate-400'
             }`}
           >
             <Home className="w-3.5 h-3.5" />
-            <span>Всі модулі</span>
+            <span>Проєкт</span>
           </button>
 
           {selectedModules.length > 0 && (
@@ -222,157 +550,126 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         </div>
 
         {/* Layout Engine Switcher */}
-        <div className="flex items-center gap-1 bg-[#161b22]/95 border border-[#30363d] p-1 rounded-xl shadow-2xl backdrop-blur-md">
+        <div className="flex items-center gap-1 bg-[#161b22]/95 border border-[#30363d] p-1 rounded-xl shadow-2xl backdrop-blur-md pointer-events-auto">
           <button
-            onClick={() => setLayoutMode('layered')}
+            onClick={() => handleLayoutChange('dagre')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              layoutMode === 'layered'
+              layoutMode === 'dagre'
                 ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Архітектурний потік зверху-вниз"
+            title="Ієрархічний потік (Dagre)"
           >
             <Layers className="w-3.5 h-3.5 text-sky-400" />
             <span>Шари</span>
           </button>
 
           <button
-            onClick={() => setLayoutMode('packages')}
+            onClick={() => handleLayoutChange('fcose')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              layoutMode === 'packages'
+              layoutMode === 'fcose'
                 ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Групувати в острови пакетів"
+            title="Кластери (FCoSE Physics)"
           >
             <Box className="w-3.5 h-3.5 text-purple-400" />
-            <span>Пакети</span>
+            <span>Кластери</span>
           </button>
 
           <button
-            onClick={() => setLayoutMode('focus')}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-              layoutMode === 'focus'
-                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-            title="3 Колонки: Вхідні -> Ціль -> Вихідні"
-          >
-            <Target className="w-3.5 h-3.5 text-rose-400" />
-            <span>Фокус</span>
-          </button>
-
-          <button
-            onClick={() => setLayoutMode('grid')}
+            onClick={() => handleLayoutChange('grid')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
               layoutMode === 'grid'
                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Компактна матрична сітка"
+            title="Сітка елементів"
           >
             <Grid className="w-3.5 h-3.5 text-emerald-400" />
             <span>Сітка</span>
           </button>
         </div>
 
-        {/* Quick Toggles: Hide DTOs, Only Active Edges */}
-        <div className="flex items-center gap-1 bg-[#161b22]/95 border border-[#30363d] p-1 rounded-xl shadow-2xl backdrop-blur-md text-xs">
-          {onToggleIncludeExternal && (
-            <button
-              onClick={onToggleIncludeExternal}
-              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-medium transition-all ${
-                includeExternal
-                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-              title="Відображати зовнішні залежності"
-            >
-              <Globe className="w-3.5 h-3.5 text-purple-400" />
-              <span>Зовнішні</span>
-            </button>
-          )}
-
+        {/* View Options & Filters */}
+        <div className="flex items-center gap-1 bg-[#161b22]/95 border border-[#30363d] p-1 rounded-xl shadow-2xl backdrop-blur-md pointer-events-auto">
+          {/* Active Edges Only Toggle */}
           <button
-            onClick={() => setHideDTOs(!hideDTOs)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-medium transition-all ${
-              hideDTOs
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+            onClick={() => setOnlyActiveEdges(!onlyActiveEdges)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              onlyActiveEdges
+                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 font-semibold'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Приховати другорядні DTO та Entity"
+            title="Приховувати неактивні зв'язки при виборі вузла"
           >
-            <Filter className="w-3.5 h-3.5" />
+            <Filter className="w-3.5 h-3.5 text-purple-400" />
+            <span>Фокус</span>
+          </button>
+
+          {/* Hide DTOs Toggle */}
+          <button
+            onClick={() => setHideDTOs(!hideDTOs)}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              hideDTOs
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-semibold'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+            title="Сховати DTO / Entity класи"
+          >
+            {hideDTOs ? <EyeOff className="w-3.5 h-3.5 text-amber-400" /> : <Eye className="w-3.5 h-3.5" />}
             <span>Без DTO</span>
           </button>
 
-          <button
-            onClick={() => setOnlyActiveEdges(!onlyActiveEdges)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg font-medium transition-all ${
-              onlyActiveEdges
-                ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-            title="Приховувати фонові лінії, показувати тільки активні стрілки вибраного елемента"
-          >
-            {onlyActiveEdges ? <EyeOff className="w-3.5 h-3.5 text-sky-400" /> : <Eye className="w-3.5 h-3.5" />}
-            <span>{onlyActiveEdges ? 'Тільки активні' : 'Усі зв\'язки'}</span>
-          </button>
+          {/* External/Cross-Module Toggle */}
+          {onToggleIncludeExternal && (
+            <button
+              onClick={onToggleIncludeExternal}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                includeExternal
+                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-semibold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Показувати зв'язки до зовнішніх модулів"
+            >
+              <Globe className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Зовнішні</span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Main React Flow Graph Viewport */}
-      <ReactFlow
-        nodes={nodes}
-        edges={edges}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        onNodeClick={(_, node) => onSelectNode(node.id)}
-        onNodeDoubleClick={handleNodeDoubleClick}
-        onPaneClick={onCanvasClick}
-        minZoom={0.05}
-        maxZoom={2.0}
-        defaultViewport={{ x: 80, y: 80, zoom: 0.75 }}
-        fitView
-        fitViewOptions={{ padding: 0.2, maxZoom: 1.0 }}
-        attributionPosition="bottom-left"
-        className="w-full h-full"
-      >
-        <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#30363d" />
-        <Controls
-          showInteractive={false}
-          className="!bg-[#161b22] !border-[#30363d] !rounded-xl !shadow-2xl overflow-hidden [&>button]:!bg-[#161b22] [&>button]:!border-[#30363d] [&>button]:!text-slate-300 [&>button:hover]:!bg-[#21262d]"
-        />
-        <MiniMap
-          nodeColor={(n) => {
-            const data = n.data as any;
-            if (data.layer === 'UI') return '#38bdf8';
-            if (data.layer === 'Service') return '#fb923c';
-            if (data.layer === 'Infrastructure') return '#c084fc';
-            if (data.layer === 'Domain') return '#34d399';
-            return '#64748b';
-          }}
-          maskColor="rgba(13, 17, 23, 0.85)"
-          className="!bg-[#161b22] !border-[#30363d] !rounded-xl !shadow-2xl overflow-hidden"
-        />
-      </ReactFlow>
+      {/* BOTTOM-LEFT FLOATING CONTROLS (Zoom & Fit) */}
+      <div className="absolute bottom-4 left-4 flex items-center gap-1.5 bg-[#161b22]/95 border border-[#30363d] p-1.5 rounded-xl shadow-2xl backdrop-blur-md z-20">
+        <button
+          onClick={handleZoomIn}
+          className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition"
+          title="Наблизити (Zoom In)"
+        >
+          <ZoomIn className="w-4 h-4" />
+        </button>
+        <button
+          onClick={handleZoomOut}
+          className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition"
+          title="Віддалити (Zoom Out)"
+        >
+          <ZoomOut className="w-4 h-4" />
+        </button>
+        <div className="w-px h-4 bg-[#30363d] mx-0.5" />
+        <button
+          onClick={handleFit}
+          className="p-1.5 hover:bg-white/10 rounded-lg text-sky-400 hover:text-sky-300 transition"
+          title="Вмістити весь граф на екрані (Fit to Screen)"
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
+      </div>
 
-      {/* Bottom Hint & Visual Legend */}
-      <div className="absolute bottom-4 right-4 z-20 pointer-events-none flex items-center gap-2">
-        <div className="px-3 py-1.5 rounded-xl bg-[#161b22]/95 border border-[#30363d] text-[11px] font-mono shadow-2xl backdrop-blur-md flex items-center gap-3">
-          <span className="flex items-center gap-1.5 text-sky-300 font-bold">
-            <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
-            <span>⬅ Вхідні (Хто викликає)</span>
-          </span>
-          <span className="flex items-center gap-1.5 text-amber-300 font-bold">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-            <span>➡ Вихідні (Кого викликає)</span>
-          </span>
-          <span className="flex items-center gap-1.5 text-rose-400 font-bold">
-            <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
-            <span>⟳ Цикл</span>
-          </span>
-        </div>
+      {/* BOTTOM-RIGHT METRICS COUNTER */}
+      <div className="absolute bottom-4 right-4 bg-[#161b22]/90 border border-[#30363d] px-3 py-1.5 rounded-xl shadow-2xl backdrop-blur-md z-20 text-[11px] font-mono text-slate-400 flex items-center gap-3 pointer-events-none">
+        <span>Вузлів: <b className="text-slate-200">{filteredNodes.length}</b></span>
+        <span>Зв'язків: <b className="text-slate-200">{filteredEdges.length}</b></span>
+        <span className="text-emerald-400 font-bold">⚡ 60 FPS (Canvas)</span>
       </div>
     </div>
   );

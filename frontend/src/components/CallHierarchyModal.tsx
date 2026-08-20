@@ -1,39 +1,27 @@
-import React, { useState, useEffect, useMemo, memo } from 'react';
-import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  Handle,
-  Position,
-  NodeProps,
-  BackgroundVariant,
-  MarkerType,
-  BaseEdge,
-  EdgeProps,
-  getBezierPath,
-} from '@xyflow/react';
-import '@xyflow/react/dist/style.css';
-import { CallHierarchyGraph, CallHierarchyNode, CallHierarchyEdge } from '../types';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import cytoscape, { Core, EventObject } from 'cytoscape';
+// @ts-ignore
+import dagre from 'cytoscape-dagre';
+import { CallHierarchyGraph, CallHierarchyNode } from '../types';
 import { getCallHierarchy } from '../api/client';
 import {
-  GitCommit,
+  X,
+  Sliders,
   ArrowDownLeft,
   ArrowUpRight,
-  X,
+  Maximize2,
+  Minimize2,
   Target,
-  Sliders,
-  Filter,
-  Code2,
-  Database,
-  Layers,
+  Workflow,
   Network,
   LayoutGrid,
-  Radio,
-  Tv,
-  Maximize2,
-  Minimize2
+  ZoomIn,
+  ZoomOut
 } from 'lucide-react';
+
+try {
+  cytoscape.use(dagre);
+} catch {}
 
 interface CallHierarchyModalProps {
   isOpen: boolean;
@@ -42,191 +30,15 @@ interface CallHierarchyModalProps {
   onNavigateToClass?: (classId: string) => void;
 }
 
-// -------------------------------------------------------------
-// CUSTOM NODE FOR CALL HIERARCHY FLOW
-// -------------------------------------------------------------
-const CallHierarchyFlowNode = memo(({ data }: NodeProps<any>) => {
-  const node = data.node as CallHierarchyNode;
-  const isRoot = node.depth === 0;
-  const onSelect = data.onSelect as (id: string) => void;
-
-  const getLayerBadge = (layer: string) => {
-    switch (layer) {
-      case 'UI':
-        return 'bg-teal-700 text-white border-teal-500';
-      case 'Service':
-        return 'bg-blue-700 text-white border-blue-500';
-      case 'Domain':
-        return 'bg-amber-700 text-white border-amber-500';
-      case 'Infrastructure':
-        return 'bg-indigo-700 text-white border-indigo-500';
-      default:
-        return 'bg-slate-700 text-white border-slate-500';
-    }
-  };
-
-  const getHopBadge = () => {
-    if (isRoot) {
-      return 'bg-purple-500 text-slate-950 font-bold';
-    }
-    if (node.depth < 0) {
-      return 'bg-sky-500/30 text-[#38bdf8] border border-sky-500/50 font-bold';
-    }
-    return 'bg-amber-500/30 text-[#fb923c] border border-amber-500/50 font-bold';
-  };
-
-  let borderClass = isRoot
-    ? 'border-2 border-[#c084fc] bg-[#1e172e] shadow-2xl ring-2 ring-purple-400/40'
-    : node.depth < 0
-    ? 'border-2 border-[#38bdf8] bg-[#0c2d48] hover:border-sky-300 shadow-md'
-    : 'border-2 border-[#fb923c] bg-[#3d1a04] hover:border-amber-300 shadow-md';
-
-  return (
-    <div
-      onClick={() => !isRoot && onSelect(node.id)}
-      className={`w-[280px] rounded-xl border p-3 shadow-xl transition-all duration-150 cursor-pointer ${borderClass}`}
-    >
-      <Handle
-        type="target"
-        position={Position.Left}
-        className="!bg-[#38bdf8] !w-3 !h-3 !border-2 !border-[#0d1117] !-left-1.5"
-      />
-
-      <div className="flex items-center justify-between gap-1.5 mb-1.5">
-        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${getHopBadge()}`}>
-          {isRoot ? '★ ROOT' : node.depth < 0 ? `Hop ${node.depth}` : `Hop +${node.depth}`}
-        </span>
-        <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-bold ${getLayerBadge(node.layer)}`}>
-          {node.layer}
-        </span>
-      </div>
-
-      {/* Method Name - Pure White and High Contrast */}
-      <div
-        className="text-[14px] font-bold font-mono text-white truncate tracking-wide mt-1"
-        style={{ color: '#ffffff' }}
-        title={node.name}
-      >
-        {node.name}{node.member_type === 'method' ? '()' : ''}
-      </div>
-
-      {/* Declaring Class Name */}
-      <div
-        className="text-[11px] font-mono truncate mt-0.5"
-        style={{ color: '#bae6fd' }}
-        title={node.declaring_class}
-      >
-        📁 {node.class_simple_name}
-      </div>
-
-      {/* Signature / Return Type */}
-      {node.return_or_field_type && (
-        <div
-          className="text-[10px] font-mono truncate mt-1 bg-black/60 px-2 py-0.5 rounded border border-white/10"
-          style={{ color: '#f8fafc' }}
-          title={node.return_or_field_type}
-        >
-          {node.member_type === 'method' ? `➔ ${node.return_or_field_type}` : `type: ${node.return_or_field_type}`}
-        </div>
-      )}
-
-      <Handle
-        type="source"
-        position={Position.Right}
-        className="!bg-[#fb923c] !w-3 !h-3 !border-2 !border-[#0d1117] !-right-1.5"
-      />
-    </div>
-  );
-});
-
-// -------------------------------------------------------------
-// CUSTOM EDGE FOR CALL HIERARCHY FLOW
-// -------------------------------------------------------------
-const CallHierarchyFlowEdge = memo(({
-  id,
-  sourceX,
-  sourceY,
-  targetX,
-  targetY,
-  sourcePosition,
-  targetPosition,
-  data,
-}: EdgeProps<any>) => {
-  const [edgePath, labelX, labelY] = getBezierPath({
-    sourceX,
-    sourceY,
-    sourcePosition,
-    targetX,
-    targetY,
-    targetPosition,
-    curvature: 0.35,
-  });
-
-  const isGwtRpc = data?.call_kind?.includes('Gwt') || data?.call_kind?.includes('Rpc');
-  const isField = data?.call_kind === 'FieldAccess';
-  const label = data?.label as string | undefined;
-  const hopDepth = data?.hop_depth as number | undefined;
-  const isIndirect = hopDepth !== undefined && hopDepth >= 2;
-
-  let strokeColor = isGwtRpc ? '#d946ef' : isField ? '#c084fc' : isIndirect ? '#818cf8' : '#38bdf8';
-  let strokeWidth = isIndirect ? 1.8 : 2.5;
-  let strokeDasharray = isIndirect ? '6,4' : isField ? '4,4' : undefined;
-
-  return (
-    <>
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        style={{
-          stroke: strokeColor,
-          strokeWidth,
-          strokeDasharray,
-          filter: `drop-shadow(0 0 ${isIndirect ? '2px' : '4px'} ${strokeColor}66)`,
-        }}
-      />
-      {(label || isIndirect) && (
-        <foreignObject
-          width={120}
-          height={22}
-          x={labelX - 60}
-          y={labelY - 11}
-          className="pointer-events-none"
-        >
-          <div className="flex items-center justify-center h-full">
-            <span
-              className={`text-[8px] font-mono font-bold px-1.5 py-0.2 rounded-full border shadow flex items-center gap-1 ${
-                isIndirect
-                  ? 'bg-indigo-950/90 border-indigo-500/50 text-indigo-300'
-                  : 'bg-[#161b22]/95 border-[#30363d] text-slate-300'
-              }`}
-            >
-              {isIndirect && <span className="text-[7px] text-indigo-400">Hop {hopDepth}</span>}
-              <span>{label || 'calls'}</span>
-            </span>
-          </div>
-        </foreignObject>
-      )}
-    </>
-  );
-});
-
-const nodeTypes = {
-  callNode: CallHierarchyFlowNode as any,
-};
-
-const edgeTypes = {
-  callEdge: CallHierarchyFlowEdge as any,
-};
-
-// -------------------------------------------------------------
-// MAIN MODAL COMPONENT
-// -------------------------------------------------------------
 export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
   isOpen,
   onClose,
   targetId,
   onNavigateToClass,
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const cyRef = useRef<Core | null>(null);
+
   const [depth, setDepth] = useState<number>(2);
   const [direction, setDirection] = useState<'all' | 'inbound' | 'outbound'>('all');
   const [viewMode, setViewMode] = useState<'diagram' | 'columns'>('diagram');
@@ -266,134 +78,243 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
   const callers = hierarchy?.nodes.filter((n) => n.depth < 0).sort((a, b) => b.depth - a.depth) || [];
   const callees = hierarchy?.nodes.filter((n) => n.depth > 0).sort((a, b) => a.depth - b.depth) || [];
 
-  // -------------------------------------------------------------
-  // LAYOUT ENGINE FOR HIERARCHY FLOW DIAGRAM
-  // -------------------------------------------------------------
-  const { rfNodes, rfEdges } = useMemo(() => {
-    if (!hierarchy || hierarchy.nodes.length === 0) {
-      return { rfNodes: [], rfEdges: [] };
-    }
+  // Filtered elements for Cytoscape
+  const { cyElements } = useMemo(() => {
+    if (!hierarchy || hierarchy.nodes.length === 0) return { cyElements: [] };
 
-    // Filter nodes based on direction
     const filteredNodes = hierarchy.nodes.filter((n) => {
       if (direction === 'inbound') return n.depth <= 0;
       if (direction === 'outbound') return n.depth >= 0;
       return true;
     });
 
-    const filteredNodeIds = new Set(filteredNodes.map((n) => n.id));
+    const nodeIds = new Set(filteredNodes.map((n) => n.id));
+    const filteredEdges = hierarchy.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
 
-    // Group nodes by depth
+    const elements: cytoscape.ElementDefinition[] = [];
+
+    // Group nodes by depth to assign distinct positions
     const nodesByDepth: Record<number, CallHierarchyNode[]> = {};
     for (const node of filteredNodes) {
-      if (!nodesByDepth[node.depth]) {
-        nodesByDepth[node.depth] = [];
-      }
+      if (!nodesByDepth[node.depth]) nodesByDepth[node.depth] = [];
       nodesByDepth[node.depth].push(node);
     }
 
-    const X_SPACING = 300;
-    const Y_SPACING = 130;
+    const X_SPACING = 320;
+    const Y_SPACING = 90;
 
-    const rfNodes = filteredNodes.map((node) => {
-      const depthNodes = nodesByDepth[node.depth] || [];
-      const indexInDepth = depthNodes.findIndex((n) => n.id === node.id);
-      const totalInDepth = depthNodes.length;
+    for (const node of filteredNodes) {
+      const depthGroup = nodesByDepth[node.depth] || [];
+      const index = depthGroup.findIndex((n) => n.id === node.id);
+      const total = depthGroup.length;
 
-      // X coordinate: -2 * 300, -1 * 300, 0, +1 * 300, +2 * 300
-      const x = node.depth * X_SPACING;
-      // Y coordinate: centered around Y = 0
-      const y = (indexInDepth - (totalInDepth - 1) / 2) * Y_SPACING;
+      const posX = (node.depth + depth) * X_SPACING;
+      const posY = (index - (total - 1) / 2) * Y_SPACING;
 
-      return {
-        id: node.id,
-        type: 'callNode',
-        position: { x, y },
+      const isRoot = node.depth === 0;
+      const isCaller = node.depth < 0;
+      const shortClass = node.class_simple_name || node.declaring_class.split('.').pop() || node.declaring_class;
+      const label = `${shortClass}.${node.name}()`;
+
+      elements.push({
+        group: 'nodes',
         data: {
-          node,
-          onSelect: (id: string) => setActiveTarget(id),
+          id: node.id,
+          label: label,
+          depth: node.depth,
+          isRoot: isRoot ? 'true' : 'false',
+          isCaller: isCaller ? 'true' : 'false',
+          declaringClass: node.declaring_class,
+          methodName: node.name,
         },
-      };
-    });
+        position: { x: posX, y: posY },
+      });
+    }
 
-    const nodeMap = new Map(filteredNodes.map((n) => [n.id, n]));
-
-    const rfEdges = hierarchy.edges
-      .filter((e) => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target))
-      .map((edge) => {
-        const srcNode = nodeMap.get(edge.source);
-        const tgtNode = nodeMap.get(edge.target);
-        const edgeDepth = Math.max(Math.abs(srcNode?.depth || 0), Math.abs(tgtNode?.depth || 0));
-        const isIndirect = edgeDepth >= 2;
-
-        return {
+    for (const edge of filteredEdges) {
+      elements.push({
+        group: 'edges',
+        data: {
           id: edge.id,
           source: edge.source,
           target: edge.target,
-          type: 'callEdge',
-          data: { ...edge, hop_depth: edgeDepth },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            width: 12,
-            height: 12,
-            color: edge.call_kind?.includes('Gwt') ? '#d946ef' : isIndirect ? '#818cf8' : '#38bdf8',
-          },
-          animated: true,
-        };
+          label: edge.call_kind || '',
+          isGwt: edge.call_kind?.includes('Gwt') ? 'true' : 'false',
+        },
       });
+    }
 
-    return { rfNodes, rfEdges };
-  }, [hierarchy, direction]);
+    return { cyElements: elements };
+  }, [hierarchy, direction, depth]);
+
+  // Cytoscape Canvas Lifecycle
+  useEffect(() => {
+    if (!isOpen || viewMode !== 'diagram' || !containerRef.current || cyElements.length === 0) return;
+
+    const cy = cytoscape({
+      container: containerRef.current,
+      elements: cyElements,
+      boxSelectionEnabled: false,
+      autounselectify: false,
+      minZoom: 0.1,
+      maxZoom: 3.5,
+      wheelSensitivity: 0.25,
+      style: [
+        {
+          selector: 'node',
+          style: {
+            'shape': 'round-rectangle',
+            'width': '240px',
+            'height': '54px',
+            'background-color': '#161b22',
+            'border-width': '2px',
+            'border-color': '#30363d',
+            'corner-radius': '10px',
+            'label': 'data(label)',
+            'color': '#ffffff',
+            'font-family': 'JetBrains Mono, Fira Code, monospace',
+            'font-size': '11px',
+            'font-weight': 'bold',
+            'text-valign': 'center',
+            'text-halign': 'center',
+            'text-wrap': 'ellipsis',
+            'text-max-width': '220px',
+            'text-outline-color': '#0d1117',
+            'text-outline-width': '2px',
+          } as any,
+        },
+        // Root Target Node
+        {
+          selector: 'node[isRoot = "true"]',
+          style: {
+            'background-color': '#3b0764',
+            'border-color': '#c084fc',
+            'border-width': '3px',
+            'width': '260px',
+            'height': '60px',
+            'font-size': '12px',
+            'shadow-blur': 20,
+            'shadow-color': '#a855f7',
+            'shadow-opacity': 0.7,
+          } as any,
+        },
+        // Caller Nodes
+        {
+          selector: 'node[isCaller = "true"]',
+          style: {
+            'background-color': '#082f49',
+            'border-color': '#38bdf8',
+          },
+        },
+        // Callee Nodes
+        {
+          selector: 'node[isCaller = "false"][isRoot = "false"]',
+          style: {
+            'background-color': '#431407',
+            'border-color': '#fb923c',
+          },
+        },
+        // Edge styling
+        {
+          selector: 'edge',
+          style: {
+            'width': 2.5,
+            'line-color': '#38bdf8',
+            'curve-style': 'bezier',
+            'target-arrow-shape': 'triangle-backcurve',
+            'target-arrow-color': '#38bdf8',
+            'arrow-scale': 1.2,
+            'opacity': 0.8,
+          } as any,
+        },
+        {
+          selector: 'edge[isGwt = "true"]',
+          style: {
+            'line-color': '#d946ef',
+            'target-arrow-color': '#d946ef',
+            'width': 3,
+          },
+        },
+      ],
+    });
+
+    cy.on('tap', 'node', (evt: EventObject) => {
+      const node = evt.target;
+      const id = node.id();
+      if (id !== activeTarget) {
+        setActiveTarget(id);
+      }
+    });
+
+    cyRef.current = cy;
+
+    cy.fit(undefined, 50);
+
+    return () => {
+      cy.destroy();
+    };
+  }, [isOpen, viewMode, cyElements]);
 
   if (!isOpen || !activeTarget) return null;
 
-  const getLayerBadge = (layer: string) => {
-    switch (layer) {
-      case 'UI':
-        return 'bg-rose-500/20 text-rose-300 border-rose-500/40';
-      case 'Service':
-        return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
-      case 'Domain':
-        return 'bg-blue-500/20 text-blue-300 border-blue-500/40';
-      case 'Infrastructure':
-        return 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
-      default:
-        return 'bg-slate-500/20 text-slate-300 border-slate-500/40';
+  const handleFit = () => {
+    if (cyRef.current) {
+      cyRef.current.animate({
+        fit: { eles: cyRef.current.elements(), padding: 50 },
+        duration: 300,
+      });
+    }
+  };
+
+  const handleZoomIn = () => {
+    if (cyRef.current && containerRef.current) {
+      cyRef.current.zoom({
+        level: cyRef.current.zoom() * 1.3,
+        renderedPosition: {
+          x: containerRef.current.clientWidth / 2,
+          y: containerRef.current.clientHeight / 2,
+        },
+      });
+    }
+  };
+
+  const handleZoomOut = () => {
+    if (cyRef.current && containerRef.current) {
+      cyRef.current.zoom({
+        level: cyRef.current.zoom() * 0.75,
+        renderedPosition: {
+          x: containerRef.current.clientWidth / 2,
+          y: containerRef.current.clientHeight / 2,
+        },
+      });
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md animate-in fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 bg-black/80 backdrop-blur-md animate-in fade-in duration-200 select-none">
       <div
-        className={`bg-[#161b22] border border-[#30363d] rounded-2xl flex flex-col shadow-2xl overflow-hidden transition-all duration-200 ${
-          isMaximized
-            ? 'w-[98vw] h-[96vh] max-w-none'
-            : 'w-full max-w-6xl h-[88vh]'
+        className={`bg-[#161b22] border border-[#30363d] rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-300 ${
+          isMaximized ? 'w-[98vw] h-[96vh]' : 'w-full max-w-6xl h-[88vh]'
         }`}
       >
         {/* Header */}
-        <div className="p-3.5 px-5 border-b border-[#30363d] flex items-center justify-between bg-black/40 flex-shrink-0">
-          <div className="flex items-center gap-3 min-w-0 pr-3">
-            <div className="p-2.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-400">
-              <GitCommit className="w-5 h-5" />
+        <div className="p-4 border-b border-[#30363d] bg-black/30 flex items-center justify-between gap-4 flex-shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/15 border border-purple-500/30 flex items-center justify-center text-purple-400 flex-shrink-0 shadow-inner">
+              <Workflow className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <div className="flex items-center gap-2 mb-0.5">
-                <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                  {rootNode?.member_type === 'field' ? 'Field Usage Flow' : 'Call Hierarchy'}
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-purple-400 font-mono">
+                  Ієрархія викликів
                 </span>
-                {rootNode?.layer && (
-                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${getLayerBadge(rootNode.layer)}`}>
-                    {rootNode.layer}
-                  </span>
-                )}
+                <span className="text-[10px] font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded">
+                  {callers.length} вхідних • {callees.length} вихідних
+                </span>
               </div>
-              <h2 className="text-base font-bold text-slate-100 font-mono truncate" title={rootNode?.signature || activeTarget}>
-                {rootNode?.name || activeTarget}
+              <h2 className="text-base font-bold text-white truncate font-mono mt-0.5" title={activeTarget}>
+                {rootNode ? `${rootNode.declaring_class.split('.').pop()}.${rootNode.name}()` : activeTarget}
               </h2>
-              <p className="text-xs font-mono text-slate-400 truncate" title={rootNode?.declaring_class}>
-                {rootNode?.declaring_class}
-              </p>
             </div>
           </div>
 
@@ -429,7 +350,7 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
 
         {/* Toolbar Controls */}
         <div className="p-2.5 px-5 border-b border-[#30363d] bg-[#0d1117]/80 flex flex-wrap items-center justify-between gap-3 text-xs flex-shrink-0">
-          {/* Left: View Mode Switcher */}
+          {/* View Mode Switcher */}
           <div className="flex items-center gap-1 bg-[#161b22] p-1 rounded-xl border border-[#30363d]">
             <button
               onClick={() => setViewMode('diagram')}
@@ -438,7 +359,7 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
                   ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="Відобразити у вигляді інтерактивного графа зв'язків"
+              title="Відобразити у вигляді інтерактивного графа"
             >
               <Network className="w-3.5 h-3.5 text-purple-400" />
               <span>Діаграма викликів</span>
@@ -451,14 +372,14 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
                   ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="Відобразити у 3 структурованих колонках"
+              title="Відобразити у 3 колонках"
             >
               <LayoutGrid className="w-3.5 h-3.5 text-sky-400" />
               <span>Колонки</span>
             </button>
           </div>
 
-          {/* Middle: Depth Selector */}
+          {/* Depth Selector */}
           <div className="flex items-center gap-2">
             <span className="text-slate-400 font-medium flex items-center gap-1">
               <Sliders className="w-3.5 h-3.5 text-sky-400" /> Глибина (Depth):
@@ -480,7 +401,7 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
             </div>
           </div>
 
-          {/* Right: Direction Filter */}
+          {/* Direction Filter */}
           <div className="flex items-center gap-1 bg-[#161b22] p-1 rounded-lg border border-[#30363d]">
             <button
               onClick={() => setDirection('all')}
@@ -523,218 +444,118 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
               Побудова графа викликів (Depth {depth})...
             </div>
           ) : viewMode === 'diagram' ? (
-            /* 1. INTERACTIVE REACT FLOW GRAPH DIAGRAM */
             <div className="w-full h-full relative">
-              {/* Visual Depth Step Column Headers */}
-              <div className="absolute top-3 inset-x-0 z-10 pointer-events-none flex items-center justify-center gap-8 text-[11px] font-mono text-slate-400 opacity-60">
-                <span>◀ Вхідні виклики (Callers)</span>
-                <span className="font-bold text-purple-300 px-2 py-0.5 rounded bg-purple-500/15 border border-purple-500/30">
-                  ★ Цільовий елемент
-                </span>
-                <span>Вихідні виклики (Callees) ▶</span>
-              </div>
+              {/* Cytoscape Canvas */}
+              <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
 
-              <ReactFlow
-                nodes={rfNodes}
-                edges={rfEdges}
-                nodeTypes={nodeTypes}
-                edgeTypes={edgeTypes}
-                fitView
-                minZoom={0.2}
-                maxZoom={2}
-                defaultEdgeOptions={{ type: 'callEdge' }}
-              >
-                <Background
-                  variant={BackgroundVariant.Dots}
-                  gap={20}
-                  size={1.2}
-                  color="#21262d"
-                />
-                <Controls />
-                <MiniMap
-                  nodeColor={(node: any) => {
-                    const d = node.data?.node?.depth;
-                    if (d === 0) return '#c084fc';
-                    if (d < 0) return '#38bdf8';
-                    return '#fb923c';
-                  }}
-                  maskColor="rgba(13, 17, 23, 0.85)"
-                  className="!bg-[#161b22] !border !border-[#30363d] !rounded-xl !overflow-hidden !shadow-2xl"
-                />
-              </ReactFlow>
+              {/* Floating Canvas Zoom/Fit Controls */}
+              <div className="absolute bottom-4 left-4 flex items-center gap-1.5 bg-[#161b22]/95 border border-[#30363d] p-1.5 rounded-xl shadow-2xl backdrop-blur-md z-20">
+                <button
+                  onClick={handleZoomIn}
+                  className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition"
+                  title="Наблизити"
+                >
+                  <ZoomIn className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleZoomOut}
+                  className="p-1.5 hover:bg-white/10 rounded-lg text-slate-300 hover:text-white transition"
+                  title="Віддалити"
+                >
+                  <ZoomOut className="w-4 h-4" />
+                </button>
+                <div className="w-px h-4 bg-[#30363d] mx-0.5" />
+                <button
+                  onClick={handleFit}
+                  className="p-1.5 hover:bg-white/10 rounded-lg text-sky-400 hover:text-sky-300 transition"
+                  title="Вмістити на екрані"
+                >
+                  <Maximize2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           ) : (
-            /* 2. 3-COLUMN STRUCTURED VIEW */
+            /* 3-Column Structured View */
             <div className="p-5 h-full overflow-y-auto">
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-start">
-                {/* Column 1: Inbound Callers */}
-                {(direction === 'all' || direction === 'inbound') && (
-                  <div className="space-y-3 bg-[#0d1117] p-4 rounded-xl border border-[#30363d]">
-                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                      <span className="text-xs font-bold text-sky-400 flex items-center gap-1.5 font-mono">
-                        <ArrowDownLeft className="w-4 h-4" /> Хто викликає (Fan-In)
-                      </span>
-                      <span className="text-[11px] font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded">
-                        {callers.length} методів
-                      </span>
-                    </div>
-
-                    {callers.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic py-4 text-center">
-                        Немає прямих викликів у межах глибини {depth}
-                      </p>
-                    ) : (
-                      <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
-                        {callers.map((node) => (
-                          <div
-                            key={node.id}
-                            onClick={() => setActiveTarget(node.id)}
-                            className="p-3 rounded-xl bg-[#161f2e] hover:bg-[#1e293b] border-2 border-[#38bdf8]/30 hover:border-sky-400 transition-all cursor-pointer group shadow-md"
-                          >
-                            <div className="flex items-center justify-between gap-1 mb-1">
-                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-sky-500/20 text-[#38bdf8] border border-sky-500/40 font-bold">
-                                Hop {node.depth}
-                              </span>
-                              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border font-bold ${getLayerBadge(node.layer)}`}>
-                                {node.layer}
-                              </span>
-                            </div>
-                            <p
-                              className="text-[13px] font-bold font-mono text-white truncate"
-                              style={{ color: '#ffffff' }}
-                              title={node.name}
-                            >
-                              {node.name}()
-                            </p>
-                            <p
-                              className="text-[11px] font-mono truncate mt-0.5"
-                              style={{ color: '#bae6fd' }}
-                              title={node.declaring_class}
-                            >
-                              📁 {node.class_simple_name}
-                            </p>
-                            {node.signature && (
-                              <p
-                                className="text-[10px] font-mono truncate mt-1 bg-black/60 px-1.5 py-0.5 rounded border border-white/10"
-                                style={{ color: '#f8fafc' }}
-                              >
-                                {node.signature}
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Column 2: Target Root Member */}
-                <div className="space-y-3 bg-[#1e172e] p-5 rounded-2xl border-2 border-purple-400 shadow-xl relative">
-                  <div className="absolute -top-3 left-4 px-2.5 py-0.5 rounded-full bg-purple-500 text-slate-950 text-[10px] font-mono font-bold uppercase shadow">
-                    Цільовий елемент (Root)
-                  </div>
-
-                  <div className="pt-2">
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-bold ${getLayerBadge(rootNode?.layer || 'Unknown')}`}>
-                      {rootNode?.layer || 'Element'}
+                {/* Inbound Callers */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between pb-2 border-b border-[#30363d]">
+                    <span className="text-xs font-bold text-sky-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <ArrowDownLeft className="w-4 h-4" /> Хто викликає ({callers.length})
                     </span>
-                    <h3
-                      className="text-base font-bold font-mono text-white mt-2 truncate"
-                      style={{ color: '#ffffff' }}
-                      title={rootNode?.name}
-                    >
-                      {rootNode?.name}
-                    </h3>
-                    <p
-                      className="text-xs font-mono truncate mt-0.5"
-                      style={{ color: '#bae6fd' }}
-                      title={rootNode?.declaring_class}
-                    >
-                      📁 {rootNode?.declaring_class}
-                    </p>
                   </div>
+                  <div className="space-y-2">
+                    {callers.map((node) => (
+                      <div
+                        key={node.id}
+                        onClick={() => setActiveTarget(node.id)}
+                        className="p-3 rounded-xl bg-[#161b22] border border-[#30363d] hover:border-sky-500/60 cursor-pointer transition-all hover:shadow-lg group"
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-[10px] font-mono text-sky-400 font-bold bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/20">
+                            Крок {node.depth}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono truncate">
+                            {node.declaring_class.split('.').pop()}
+                          </span>
+                        </div>
+                        <p className="text-xs font-bold text-white font-mono group-hover:text-sky-300 transition-colors truncate">
+                          {node.name}()
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-                  {rootNode?.signature && (
-                    <div className="bg-[#0d1117] p-3 rounded-xl border border-[#30363d] text-xs font-mono" style={{ color: '#e2e8f0' }}>
-                      <span className="text-slate-400 text-[10px] block mb-1">Сигнатура:</span>
-                      <span className="break-all">{rootNode.signature}</span>
+                {/* Target Element */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between pb-2 border-b border-purple-500/30">
+                    <span className="text-xs font-bold text-purple-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <Target className="w-4 h-4" /> Цільовий метод
+                    </span>
+                  </div>
+                  {rootNode && (
+                    <div className="p-4 rounded-xl bg-purple-500/10 border-2 border-purple-500/40 shadow-xl">
+                      <span className="text-[10px] font-mono text-purple-400 block truncate">
+                        {rootNode.declaring_class}
+                      </span>
+                      <h3 className="text-sm font-bold text-white font-mono mt-1">
+                        {rootNode.name}()
+                      </h3>
                     </div>
-                  )}
-
-                  {onNavigateToClass && rootNode?.declaring_class && (
-                    <button
-                      onClick={() => {
-                        onNavigateToClass(rootNode.declaring_class);
-                        onClose();
-                      }}
-                      className="w-full py-2 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-500/40 text-xs font-semibold transition-all flex items-center justify-center gap-1.5 shadow-sm"
-                    >
-                      <Target className="w-3.5 h-3.5 text-purple-300" />
-                      Перейти до класу на графі
-                    </button>
                   )}
                 </div>
 
-                {/* Column 3: Outbound Callees */}
-                {(direction === 'all' || direction === 'outbound') && (
-                  <div className="space-y-3 bg-[#0d1117] p-4 rounded-xl border border-[#30363d]">
-                    <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                      <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5 font-mono">
-                        <ArrowUpRight className="w-4 h-4" /> Кого викликає (Fan-Out)
-                      </span>
-                      <span className="text-[11px] font-mono text-slate-400 bg-white/5 px-2 py-0.5 rounded">
-                        {callees.length} елементів
-                      </span>
-                    </div>
-
-                    {callees.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic py-4 text-center">
-                        Немає вихідних викликів у межах глибини {depth}
-                      </p>
-                    ) : (
-                      <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
-                        {callees.map((node) => (
-                          <div
-                            key={node.id}
-                            onClick={() => setActiveTarget(node.id)}
-                            className="p-3 rounded-xl bg-[#161f2e] hover:bg-[#1e293b] border-2 border-[#fb923c]/30 hover:border-amber-400 transition-all cursor-pointer group shadow-md"
-                          >
-                            <div className="flex items-center justify-between gap-1 mb-1">
-                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-[#fb923c] border border-amber-500/40 font-bold">
-                                Hop +{node.depth}
-                              </span>
-                              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border font-bold ${getLayerBadge(node.layer)}`}>
-                                {node.layer}
-                              </span>
-                            </div>
-                            <p
-                              className="text-[13px] font-bold font-mono text-white truncate"
-                              style={{ color: '#ffffff' }}
-                              title={node.name}
-                            >
-                              {node.name}{node.member_type === 'method' ? '()' : ''}
-                            </p>
-                            <p
-                              className="text-[11px] font-mono truncate mt-0.5"
-                              style={{ color: '#bae6fd' }}
-                              title={node.declaring_class}
-                            >
-                              📁 {node.class_simple_name}
-                            </p>
-                            {node.signature && (
-                              <p
-                                className="text-[10px] font-mono truncate mt-1 bg-black/60 px-1.5 py-0.5 rounded border border-white/10"
-                                style={{ color: '#f8fafc' }}
-                              >
-                                {node.signature}
-                              </p>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                {/* Outbound Callees */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between pb-2 border-b border-[#30363d]">
+                    <span className="text-xs font-bold text-amber-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <ArrowUpRight className="w-4 h-4" /> Кого викликає ({callees.length})
+                    </span>
                   </div>
-                )}
+                  <div className="space-y-2">
+                    {callees.map((node) => (
+                      <div
+                        key={node.id}
+                        onClick={() => setActiveTarget(node.id)}
+                        className="p-3 rounded-xl bg-[#161b22] border border-[#30363d] hover:border-amber-500/60 cursor-pointer transition-all hover:shadow-lg group"
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1">
+                          <span className="text-[10px] font-mono text-amber-400 font-bold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                            Крок +{node.depth}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono truncate">
+                            {node.declaring_class.split('.').pop()}
+                          </span>
+                        </div>
+                        <p className="text-xs font-bold text-white font-mono group-hover:text-amber-300 transition-colors truncate">
+                          {node.name}()
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           )}
