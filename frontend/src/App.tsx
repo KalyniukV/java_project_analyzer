@@ -168,7 +168,7 @@ export function App() {
     };
   }, []);
 
-  // Fetch updated graph when tab, module/package filters, or external toggle change
+  // Fetch updated graph when tab, depth, module/package filters, or external toggle change
   useEffect(() => {
     let isMounted = true;
 
@@ -176,7 +176,7 @@ export function App() {
       getGraph(
         activeTab,
         undefined,
-        1,
+        depth,
         false,
         selectedModules.length > 0 ? selectedModules : undefined,
         selectedPackages.length > 0 ? selectedPackages : undefined,
@@ -195,7 +195,7 @@ export function App() {
     return () => {
       isMounted = false;
     };
-  }, [activeTab, selectedModules, selectedPackages, includeExternal]);
+  }, [activeTab, depth, selectedModules, selectedPackages, includeExternal]);
 
   // Handle node selection from graph or sidebar
   const handleSelectNode = (nodeId: string) => {

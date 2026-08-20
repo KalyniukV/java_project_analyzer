@@ -315,19 +315,29 @@ impl GraphAnalyzer {
                     core_ids = sorted_packages.into_iter().take(200).map(|p| p.id.clone()).collect();
                 }
 
-                // If include_external, find neighbor packages that connect with core_ids
+                // If include_external, find neighbor packages that connect with core_ids up to depth hops
                 let mut boundary_ids: HashSet<String> = HashSet::new();
                 if include_external && has_filter {
-                    for rel in &self.model.relationships {
-                        if rel.kind == RelationKind::PackageDependency {
-                            let src_in = core_ids.contains(&rel.source);
-                            let tgt_in = core_ids.contains(&rel.target);
-                            if src_in && !tgt_in {
-                                boundary_ids.insert(rel.target.clone());
-                            } else if !src_in && tgt_in {
-                                boundary_ids.insert(rel.source.clone());
+                    let mut current_frontier = core_ids.clone();
+                    let max_hops = depth.clamp(1, 5);
+                    for _ in 0..max_hops {
+                        let mut next_frontier = HashSet::new();
+                        for rel in &self.model.relationships {
+                            if rel.kind == RelationKind::PackageDependency {
+                                let src_in = current_frontier.contains(&rel.source);
+                                let tgt_in = current_frontier.contains(&rel.target);
+                                if src_in && !core_ids.contains(&rel.target) && boundary_ids.insert(rel.target.clone()) {
+                                    next_frontier.insert(rel.target.clone());
+                                }
+                                if tgt_in && !core_ids.contains(&rel.source) && boundary_ids.insert(rel.source.clone()) {
+                                    next_frontier.insert(rel.source.clone());
+                                }
                             }
                         }
+                        if next_frontier.is_empty() {
+                            break;
+                        }
+                        current_frontier = next_frontier;
                     }
                 }
 
@@ -416,19 +426,29 @@ impl GraphAnalyzer {
                     core_ids = sorted_classes.into_iter().take(200).map(|c| c.id.clone()).collect();
                 }
 
-                // If include_external, find neighbor classes outside core_ids that connect with core_ids
+                // If include_external, find neighbor classes outside core_ids that connect with core_ids up to depth hops
                 let mut boundary_ids: HashSet<String> = HashSet::new();
                 if include_external && has_filter {
-                    for rel in &self.model.relationships {
-                        if rel.kind != RelationKind::ModuleDependency && rel.kind != RelationKind::PackageDependency {
-                            let src_in = core_ids.contains(&rel.source);
-                            let tgt_in = core_ids.contains(&rel.target);
-                            if src_in && !tgt_in {
-                                boundary_ids.insert(rel.target.clone());
-                            } else if !src_in && tgt_in {
-                                boundary_ids.insert(rel.source.clone());
+                    let mut current_frontier = core_ids.clone();
+                    let max_hops = depth.clamp(1, 5);
+                    for _ in 0..max_hops {
+                        let mut next_frontier = HashSet::new();
+                        for rel in &self.model.relationships {
+                            if rel.kind != RelationKind::ModuleDependency && rel.kind != RelationKind::PackageDependency {
+                                let src_in = current_frontier.contains(&rel.source);
+                                let tgt_in = current_frontier.contains(&rel.target);
+                                if src_in && !core_ids.contains(&rel.target) && boundary_ids.insert(rel.target.clone()) {
+                                    next_frontier.insert(rel.target.clone());
+                                }
+                                if tgt_in && !core_ids.contains(&rel.source) && boundary_ids.insert(rel.source.clone()) {
+                                    next_frontier.insert(rel.source.clone());
+                                }
                             }
                         }
+                        if next_frontier.is_empty() {
+                            break;
+                        }
+                        current_frontier = next_frontier;
                     }
                 }
 
