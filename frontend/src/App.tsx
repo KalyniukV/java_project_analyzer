@@ -128,7 +128,7 @@ export function App() {
     }
   }, []);
 
-  // Initial load: check if project already loaded or try relative fixture
+  // Initial load: check if project already pre-loaded from CLI
   useEffect(() => {
     let isMounted = true;
     (async () => {
@@ -136,23 +136,21 @@ export function App() {
         const current = await getProject();
         if (isMounted && current) {
           setProject(current);
-          return;
+          if (current.modules && current.modules.length > 1) {
+            setActiveTab('modules');
+          } else {
+            setActiveTab('packages');
+          }
         }
       } catch {
-        // No project pre-loaded
-      }
-
-      try {
-        await handleScanPath('fixtures/sample-petclinic');
-      } catch {
-        // Ready for user to choose
+        // No project pre-loaded, user will pick one
       }
     })();
 
     return () => {
       isMounted = false;
     };
-  }, [handleScanPath]);
+  }, []);
 
   // Fetch updated graph when tab, selected node, depth, isolate mode, module/package filters, or external toggle change
   useEffect(() => {

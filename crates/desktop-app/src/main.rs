@@ -14,6 +14,14 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 fn main() -> Result<()> {
+    // Linux WebKitGTK graphics stability flags (prevents black screen on AMD/Intel/NVIDIA)
+    #[cfg(target_os = "linux")]
+    {
+        std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        std::env::set_var("LIBGL_ALWAYS_SOFTWARE", "1");
+    }
+
     tracing_subscriber::fmt::init();
 
     // 1. Initialize embedded NoSQL database (redb)
