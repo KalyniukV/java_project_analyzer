@@ -71,7 +71,7 @@ impl NativeJavaScanner {
             pkg_regex: Regex::new(r"package\s+([a-zA-Z0-9_.]+)\s*;").unwrap(),
             import_regex: Regex::new(r"import\s+(?:static\s+)?([a-zA-Z0-9_.]+)\s*;").unwrap(),
             class_regex: Regex::new(
-                r"(?m)(?:public|protected|private|static|final|abstract|\s)*\b(class|interface|enum|record|@interface)\s+([a-zA-Z0-9_]+)(?:<[^>]+>)?(?:\s+extends\s+([a-zA-Z0-9_.]+)(?:<[^>]+>)?)?(?:\s+implements\s+([a-zA-Z0-9_., <>]+))?",
+                r"(?m)(?:public|protected|private|static|final|abstract|\s)*\b(class|interface|enum|record|@interface)\s+([a-zA-Z0-9_]+)(?:<[^>]+>)?(?:\s+extends\s+([a-zA-Z0-9_., <>]+?))?(?:\s+implements\s+([a-zA-Z0-9_., <>]+?))?(?:\s*\{|\s*;\s*$)",
             )
             .unwrap(),
             field_regex: Regex::new(
@@ -376,7 +376,32 @@ impl NativeJavaScanner {
         let class_ids_set: HashSet<String> = model.classes.iter().map(|c| c.id.clone()).collect();
 
         for class_info in &model.classes {
-            // A. Inheritance (`extends`)
+            if class_info.kind == ClassKind::Interface {
+                // An interface ONLY has OUTBOUND "extends" to super-interfaces
+                for super_iface in &class_info.interfaces {
+                    let targets = self.resolve_type(super_iface, class_info, &classes_by_simple_name, &class_ids_set);
+                    for target_id in targets {
+                        if target_id != class_info.id {
+                            let key = (class_info.id.clone(), target_id.clone(), RelationKind::Extends);
+                            if existing_rels.insert(key) {
+                                relationships.push(Relationship {
+                                    id: format!("rel-{}", rel_id_counter),
+                                    source: class_info.id.clone(),
+                                    target: target_id,
+                                    kind: RelationKind::Extends,
+                                    description: Some(format!("extends {}", super_iface)),
+                                    is_circular: false,
+                                });
+                                rel_id_counter += 1;
+                            }
+                        }
+                    }
+                }
+                // Interfaces do not have fields or method execution bodies
+                continue;
+            }
+
+            // A. Inheritance (`extends`) for regular classes
             if let Some(super_cls) = &class_info.super_class {
                 let targets = self.resolve_type(super_cls, class_info, &classes_by_simple_name, &class_ids_set);
                 for target_id in targets {
@@ -388,7 +413,7 @@ impl NativeJavaScanner {
                                 source: class_info.id.clone(),
                                 target: target_id,
                                 kind: RelationKind::Extends,
-                                description: Some("extends".to_string()),
+                                description: Some(format!("extends {}", super_cls)),
                                 is_circular: false,
                             });
                             rel_id_counter += 1;
@@ -409,7 +434,7 @@ impl NativeJavaScanner {
                                 source: class_info.id.clone(),
                                 target: target_id,
                                 kind: RelationKind::Implements,
-                                description: Some("implements".to_string()),
+                                description: Some(format!("implements {}", iface)),
                                 is_circular: false,
                             });
                             rel_id_counter += 1;
@@ -470,51 +495,6 @@ impl NativeJavaScanner {
                                     });
                                     rel_id_counter += 1;
                                 }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // E. Method Signatures (Parameters & Return Types)
-            for method in &class_info.methods {
-                // Parameters
-                for param in &method.parameters {
-                    let targets = self.resolve_type(&param.type_name, class_info, &classes_by_simple_name, &class_ids_set);
-                    for target_id in targets {
-                        if target_id != class_info.id {
-                            let key = (class_info.id.clone(), target_id.clone(), RelationKind::MethodSignature);
-                            if existing_rels.insert(key) {
-                                relationships.push(Relationship {
-                                    id: format!("rel-{}", rel_id_counter),
-                                    source: class_info.id.clone(),
-                                    target: target_id,
-                                    kind: RelationKind::MethodSignature,
-                                    description: Some(format!("Параметр '{}: {}' у '#{}()'", param.name, param.type_name, method.name)),
-                                    is_circular: false,
-                                });
-                                rel_id_counter += 1;
-                            }
-                        }
-                    }
-                }
-
-                // Return type
-                if !method.return_type.is_empty() && method.return_type != "void" {
-                    let targets = self.resolve_type(&method.return_type, class_info, &classes_by_simple_name, &class_ids_set);
-                    for target_id in targets {
-                        if target_id != class_info.id {
-                            let key = (class_info.id.clone(), target_id.clone(), RelationKind::MethodSignature);
-                            if existing_rels.insert(key) {
-                                relationships.push(Relationship {
-                                    id: format!("rel-{}", rel_id_counter),
-                                    source: class_info.id.clone(),
-                                    target: target_id,
-                                    kind: RelationKind::MethodSignature,
-                                    description: Some(format!("Повертається з '#{}()'", method.name)),
-                                    is_circular: false,
-                                });
-                                rel_id_counter += 1;
                             }
                         }
                     }
@@ -1111,25 +1091,42 @@ impl NativeJavaScanner {
                 }
             };
 
-            let super_class = cap.get(3).map(|m| {
-                m.as_str()
-                    .split('<')
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .to_string()
-            });
+            let mut super_class = None;
+            let mut interfaces: Vec<String> = Vec::new();
 
-            let interfaces: Vec<String> = cap
-                .get(4)
-                .map(|m| {
+            if kind == ClassKind::Interface {
+                // In Java, an interface extends other interfaces: "interface A extends B, C"
+                if let Some(ext) = cap.get(3) {
+                    for s in ext.as_str().split(',') {
+                        let clean = s.split('<').next().unwrap_or("").trim().to_string();
+                        if !clean.is_empty() && clean != "implements" {
+                            interfaces.push(clean);
+                        }
+                    }
+                }
+            } else {
+                // In Java, a class extends ONE superclass and implements multiple interfaces
+                super_class = cap.get(3).map(|m| {
                     m.as_str()
                         .split(',')
-                        .map(|s| s.split('<').next().unwrap_or("").trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default();
+                        .next()
+                        .unwrap_or("")
+                        .split('<')
+                        .next()
+                        .unwrap_or("")
+                        .trim()
+                        .to_string()
+                }).filter(|s| !s.is_empty());
+
+                if let Some(imp) = cap.get(4) {
+                    for s in imp.as_str().split(',') {
+                        let clean = s.split('<').next().unwrap_or("").trim().to_string();
+                        if !clean.is_empty() {
+                            interfaces.push(clean);
+                        }
+                    }
+                }
+            }
 
             // Check if this is an inner/nested class within the file
             let is_inner_class = !file_stem.is_empty()
