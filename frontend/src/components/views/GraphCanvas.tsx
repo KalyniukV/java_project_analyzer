@@ -45,6 +45,68 @@ interface GraphCanvasProps {
   onNavigateView?: (view: 'modules' | 'packages' | 'classes') => void;
 }
 
+// -------------------------------------------------------------
+// SVG Card Generator for ReactFlow-identical visual styling
+// -------------------------------------------------------------
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function generateNodeSvg(
+  label: string,
+  layerTag: string,
+  subLabel: string,
+  inDeg: number,
+  outDeg: number,
+  headerBg: string,
+  borderColor: string,
+  isDashed: boolean = false,
+  isSelected: boolean = false
+): string {
+  const safeLabel = escapeXml(label.length > 28 ? label.substring(0, 26) + '...' : label);
+  const safeTag = escapeXml(layerTag);
+  const safeSub = escapeXml(subLabel.length > 34 ? subLabel.substring(0, 32) + '...' : subLabel);
+
+  const effectiveBorderColor = isSelected ? '#a855f7' : borderColor;
+  const borderWidth = isSelected ? '3' : '2';
+  const cardBg = isSelected ? '#201335' : '#161b22';
+
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="260" height="80" viewBox="0 0 260 80">
+    <!-- Card Container -->
+    <rect x="1.5" y="1.5" width="257" height="77" rx="8" ry="8" fill="${cardBg}" stroke="${effectiveBorderColor}" stroke-width="${borderWidth}" ${
+    isDashed && !isSelected ? 'stroke-dasharray="4 3"' : ''
+  } />
+    
+    <!-- Top Header Bar (ReactFlow Style) -->
+    <path d="M 1.5 8.5 Q 1.5 1.5 8.5 1.5 L 251.5 1.5 Q 258.5 1.5 258.5 8.5 L 258.5 23.5 L 1.5 23.5 Z" fill="${headerBg}" />
+    <text x="12" y="16.5" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9.5" font-weight="800" letter-spacing="0.6">${safeTag}</text>
+    
+    <!-- Top & Bottom Port Handles (ReactFlow Style) -->
+    <circle cx="130" cy="1.5" r="3.5" fill="#38bdf8" stroke="#0d1117" stroke-width="1.5" />
+    <circle cx="130" cy="78.5" r="3.5" fill="#38bdf8" stroke="#0d1117" stroke-width="1.5" />
+    
+    <!-- Main Label (Class / Package / Module Name) -->
+    <text x="12" y="42" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'JetBrains Mono', sans-serif" font-size="12.5" font-weight="700">${safeLabel}</text>
+    
+    <!-- Sublabel / Annotations -->
+    ${
+      safeSub
+        ? `<text x="12" y="58" fill="#93c5fd" font-family="'JetBrains Mono', monospace" font-size="9" font-weight="500">${safeSub}</text>`
+        : ''
+    }
+    
+    <!-- In / Out Dependency Counts -->
+    <text x="12" y="71.5" fill="#94a3b8" font-family="'JetBrains Mono', monospace" font-size="8.5">⬇ ${inDeg} in  •  ⬆ ${outDeg} out</text>
+  </svg>`;
+
+  return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+}
+
 export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   graphData,
   selectedNodeId,
@@ -159,104 +221,28 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       maxZoom: 4.0,
       wheelSensitivity: 0.25,
       style: [
-        // BASE NODE STYLING (Rich Card Format)
+        // BASE NODE STYLING (ReactFlow Pixel-Perfect Card)
         {
           selector: 'node',
           style: {
-            'shape': 'round-rectangle',
-            'width': '250px',
-            'height': '72px',
-            'background-color': '#161b22',
-            'border-width': '2px',
-            'border-color': '#30363d',
-            'border-opacity': 1,
-            'corner-radius': '10px',
-            'label': 'data(displayLabel)',
-            'color': '#ffffff',
-            'font-family': 'JetBrains Mono, Fira Code, monospace',
-            'font-size': '11px',
-            'font-weight': 'bold',
-            'text-valign': 'center',
-            'text-halign': 'center',
-            'text-wrap': 'wrap',
-            'text-max-width': '235px',
-            'line-height': 1.35,
-            'text-outline-color': '#0d1117',
-            'text-outline-width': '2px',
-            'transition-property': 'background-color, border-color, border-width, opacity',
+            'shape': 'rectangle',
+            'width': '260px',
+            'height': '80px',
+            'background-image': 'data(svgCard)',
+            'background-fit': 'cover',
+            'background-opacity': 0,
+            'border-width': 0,
+            'label': '',
+            'transition-property': 'opacity',
             'transition-duration': 0.15,
           } as any,
-        },
-        // Controllers / UI Layer
-        {
-          selector: 'node[layer = "ui"], node[category = "controller"]',
-          style: {
-            'background-color': '#881337',
-            'border-color': '#f43f5e',
-          },
-        },
-        // Service Layer
-        {
-          selector: 'node[layer = "service"], node[category = "service"]',
-          style: {
-            'background-color': '#1e3a8a',
-            'border-color': '#60a5fa',
-          },
-        },
-        // Repository / Data Layer
-        {
-          selector: 'node[layer = "repository"], node[category = "repository"], node[category = "dao"]',
-          style: {
-            'background-color': '#064e3b',
-            'border-color': '#34d399',
-          },
-        },
-        // Interfaces
-        {
-          selector: 'node[isInterface = "true"]',
-          style: {
-            'background-color': '#0c4a6e',
-            'border-color': '#38bdf8',
-            'border-style': 'dashed',
-          },
-        },
-        // Packages
-        {
-          selector: 'node[isPackage = "true"]',
-          style: {
-            'background-color': '#3b0764',
-            'border-color': '#c084fc',
-            'width': '260px',
-            'height': '68px',
-          },
-        },
-        // Modules
-        {
-          selector: 'node[isModule = "true"]',
-          style: {
-            'background-color': '#022c22',
-            'border-color': '#10b981',
-            'width': '270px',
-            'height': '72px',
-            'font-size': '12px',
-          },
-        },
-        // External Boundary Nodes
-        {
-          selector: 'node[isExternal = "true"]',
-          style: {
-            'border-style': 'dashed',
-            'border-width': '2px',
-          },
         },
         // SELECTED NODE STYLING
         {
           selector: 'node.selected',
           style: {
-            'border-color': '#a855f7',
-            'border-width': '4px',
-            'background-color': '#2e1065',
-            'shadow-blur': 20,
+            'background-image': 'data(svgCardSelected)',
+            'shadow-blur': 25,
             'shadow-color': '#a855f7',
             'shadow-opacity': 0.9,
             'z-index': 999,
@@ -267,9 +253,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         {
           selector: 'node.neighbor-in',
           style: {
-            'border-color': '#38bdf8',
-            'border-width': '3.5px',
-            'background-color': '#0c4a6e',
+            'shadow-blur': 15,
+            'shadow-color': '#38bdf8',
+            'shadow-opacity': 0.8,
             'opacity': 1,
             'z-index': 500,
           },
@@ -278,9 +264,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         {
           selector: 'node.neighbor-out',
           style: {
-            'border-color': '#fbbf24',
-            'border-width': '3.5px',
-            'background-color': '#451a03',
+            'shadow-blur': 15,
+            'shadow-color': '#fbbf24',
+            'shadow-opacity': 0.8,
             'opacity': 1,
             'z-index': 500,
           },
@@ -293,17 +279,17 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           },
         },
 
-        // BASE EDGE STYLING
+        // BASE EDGE STYLING (ReactFlow Clean Bezier / Step)
         {
           selector: 'edge',
           style: {
             'width': 2,
             'line-color': '#475569',
             'curve-style': 'bezier',
-            'target-arrow-shape': 'triangle-backcurve',
+            'target-arrow-shape': 'triangle',
             'target-arrow-color': '#475569',
-            'arrow-scale': 1.2,
-            'opacity': 0.65,
+            'arrow-scale': 1.1,
+            'opacity': 0.7,
             'transition-property': 'line-color, target-arrow-color, width, opacity',
             'transition-duration': 0.15,
           } as any,
@@ -437,7 +423,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       positionsCacheRef.current.clear();
     }
 
-    // Build Cytoscape element definitions
+    // Build Cytoscape element definitions with ReactFlow SVG Cards
     const newElements: cytoscape.ElementDefinition[] = [];
 
     for (const node of filteredNodes) {
@@ -448,25 +434,71 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       const isPackage = node.category === 'package' || activeView === 'packages';
       const isExternalNode = node.is_external === true;
 
+      // Determine Header Color & Layer Title
       let layerTag = 'CLASS';
-      if (isModule) layerTag = 'MODULE';
-      else if (isPackage) layerTag = 'PACKAGE';
-      else if (isInterface) layerTag = 'INTERFACE';
-      else if (layer === 'ui' || category === 'controller') layerTag = 'CONTROLLER / UI';
-      else if (layer === 'service' || category === 'service') layerTag = 'SERVICE';
-      else if (layer === 'repository' || category === 'repository' || category === 'dao') layerTag = 'REPOSITORY / DAO';
-      else if (layer === 'domain' || category === 'entity') layerTag = 'ENTITY / MODEL';
-      else if (node.sub_label?.includes('GWT')) layerTag = 'GWT RPC';
+      let headerBg = '#334155';
+      let borderColor = '#475569';
 
-      const lines: string[] = [];
-      lines.push(`« ${layerTag} »`);
-      lines.push(node.label);
-      if (node.sub_label && !isModule && !isPackage) {
-        lines.push(node.sub_label);
+      if (isModule) {
+        layerTag = '📦 MODULE';
+        headerBg = '#065f46';
+        borderColor = '#10b981';
+      } else if (isPackage) {
+        layerTag = '📁 PACKAGE';
+        headerBg = '#6b21a8';
+        borderColor = '#c084fc';
+      } else if (isInterface) {
+        layerTag = '🔷 INTERFACE';
+        headerBg = '#0369a1';
+        borderColor = '#38bdf8';
+      } else if (layer === 'ui' || category === 'controller') {
+        layerTag = '🛡️ CONTROLLER / UI';
+        headerBg = '#9f1239';
+        borderColor = '#f43f5e';
+      } else if (layer === 'service' || category === 'service') {
+        layerTag = '⚙️ SERVICE';
+        headerBg = '#1d4ed8';
+        borderColor = '#60a5fa';
+      } else if (layer === 'repository' || category === 'repository' || category === 'dao') {
+        layerTag = '💾 REPOSITORY / DAO';
+        headerBg = '#047857';
+        borderColor = '#34d399';
+      } else if (layer === 'domain' || category === 'entity') {
+        layerTag = '📦 DOMAIN ENTITY';
+        headerBg = '#b45309';
+        borderColor = '#fbbf24';
+      } else if (node.sub_label?.includes('GWT')) {
+        layerTag = '⚡ GWT RPC';
+        headerBg = '#86198f';
+        borderColor = '#d946ef';
       }
-      lines.push(`⬇ ${node.degree_in || 0} in  •  ⬆ ${node.degree_out || 0} out`);
 
-      const displayLabel = lines.join('\n');
+      const subLabel = (!isModule && !isPackage && node.sub_label) ? node.sub_label : '';
+
+      const svgCard = generateNodeSvg(
+        node.label,
+        layerTag,
+        subLabel,
+        node.degree_in || 0,
+        node.degree_out || 0,
+        headerBg,
+        borderColor,
+        isInterface || isExternalNode,
+        false
+      );
+
+      const svgCardSelected = generateNodeSvg(
+        node.label,
+        layerTag,
+        subLabel,
+        node.degree_in || 0,
+        node.degree_out || 0,
+        headerBg,
+        '#a855f7',
+        false,
+        true
+      );
+
       const cachedPos = positionsCacheRef.current.get(node.id);
 
       newElements.push({
@@ -474,7 +506,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         data: {
           id: node.id,
           label: node.label,
-          displayLabel: displayLabel,
+          svgCard: svgCard,
+          svgCardSelected: svgCardSelected,
           category: category,
           layer: layer,
           degreeIn: node.degree_in || 0,
@@ -502,7 +535,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       });
     }
 
-    // Atomic element replacement in Cytoscape memory (never touches container DOM)
+    // Atomic element replacement in Cytoscape memory
     cy.batch(() => {
       cy.elements().remove();
       cy.add(newElements);
@@ -610,8 +643,16 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
   return (
     <div className="relative w-full h-full bg-[#0d1117] overflow-hidden select-none">
-      {/* CYTOSCAPE HTML5 CANVAS CONTAINER (Preserved DOM Node) */}
-      <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      {/* CYTOSCAPE HTML5 CANVAS CONTAINER with ReactFlow Dot Grid */}
+      <div
+        ref={containerRef}
+        className="w-full h-full cursor-grab active:cursor-grabbing"
+        style={{
+          backgroundColor: '#0d1117',
+          backgroundImage: 'radial-gradient(rgba(255, 255, 255, 0.12) 1.2px, transparent 1.2px)',
+          backgroundSize: '20px 20px',
+        }}
+      />
 
       {/* TOP FLOATING BAR (Breadcrumbs & Layout Controls) */}
       <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-20 gap-3">
