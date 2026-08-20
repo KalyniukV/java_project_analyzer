@@ -149,6 +149,41 @@ export const Sidebar: React.FC<SidebarProps> = ({
     return { packagesByModMap: modMap };
   }, [project, hasModuleFilter, selectedModules]);
 
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('javalens_sidebar_width');
+    return saved ? parseInt(saved, 10) : 280;
+  });
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+
+  const startResizingSidebar = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizingSidebar(true);
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingSidebar) return;
+      const newWidth = e.clientX;
+      if (newWidth >= 200 && newWidth <= 600) {
+        setSidebarWidth(newWidth);
+        localStorage.setItem('javalens_sidebar_width', String(newWidth));
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingSidebar(false);
+    };
+
+    if (isResizingSidebar) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizingSidebar]);
+
   if (!project) return null;
 
   const modulesList = project.modules.length > 0
@@ -156,7 +191,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
     : [{ id: 'default', name: project.project_name, path: '', build_type: '', direct_dependencies: [], exported_packages: [], afferent_coupling: 0, efferent_coupling: 0, instability: 0 }];
 
   return (
-    <div className="w-80 h-full flex flex-col bg-[#161b22] border-r border-[#30363d] overflow-hidden flex-shrink-0 select-none">
+    <div
+      className="relative h-full flex flex-col bg-[#161b22] border-r border-[#30363d] overflow-hidden flex-shrink-0 select-none"
+      style={{ width: `${sidebarWidth}px` }}
+    >
+      {/* Right Resize Drag Handle */}
+      <div
+        onMouseDown={startResizingSidebar}
+        className={`absolute right-0 top-0 bottom-0 w-2 -mr-1 cursor-col-resize transition-all z-30 flex items-center justify-center group ${
+          isResizingSidebar ? 'bg-sky-500' : 'hover:bg-sky-500/50'
+        }`}
+        title="Потягніть, щоб змінити ширину дерева проєкту"
+      >
+        <div className="w-0.5 h-8 bg-white/20 rounded-full group-hover:bg-white transition-colors" />
+      </div>
+
       {/* Search Input with Instant Clear */}
       <div className="p-3 border-b border-[#30363d] bg-black/20">
         <div className="relative">

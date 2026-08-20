@@ -59,9 +59,53 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
   onClose,
   onOpenCallHierarchy,
 }) => {
+  const [panelWidth, setPanelWidth] = useState<number>(() => {
+    const saved = localStorage.getItem('javalens_inspector_width');
+    return saved ? parseInt(saved, 10) : 320;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResizing = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      const newWidth = window.innerWidth - e.clientX;
+      if (newWidth >= 240 && newWidth <= 750) {
+        setPanelWidth(newWidth);
+        localStorage.setItem('javalens_inspector_width', String(newWidth));
+      }
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    if (isResizing) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing]);
+
   if (!selectedNodeId) {
     return (
-      <div className="h-full flex flex-col items-center justify-center p-6 text-center text-slate-400">
+      <div
+        className="h-full relative flex flex-col items-center justify-center p-6 text-center text-slate-400 bg-[#161b22] border-l border-[#30363d] flex-shrink-0"
+        style={{ width: `${panelWidth}px` }}
+      >
+        {/* Left Drag Handle */}
+        <div
+          onMouseDown={startResizing}
+          className="absolute left-0 top-0 bottom-0 w-1.5 -ml-0.5 cursor-col-resize hover:bg-sky-500 transition-colors z-30"
+          title="Потягніть, щоб змінити ширину панелі деталей"
+        />
         <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center mb-3 text-slate-400">
           <ListFilter className="w-6 h-6" />
         </div>
@@ -106,9 +150,23 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#161b22] border-l border-[#30363d] overflow-y-auto">
+    <div
+      className="h-full relative flex flex-col bg-[#161b22] border-l border-[#30363d] overflow-y-auto flex-shrink-0 select-text"
+      style={{ width: `${panelWidth}px` }}
+    >
+      {/* Left Resize Drag Handle */}
+      <div
+        onMouseDown={startResizing}
+        className={`absolute left-0 top-0 bottom-0 w-2 -ml-1 cursor-col-resize transition-all z-30 flex items-center justify-center group ${
+          isResizing ? 'bg-sky-500' : 'hover:bg-sky-500/50'
+        }`}
+        title="Потягніть, щоб змінити ширину панелі деталей"
+      >
+        <div className="w-0.5 h-8 bg-white/20 rounded-full group-hover:bg-white transition-colors" />
+      </div>
+
       {/* Header */}
-      <div className="p-4 border-b border-[#30363d] flex items-start justify-between bg-black/20">
+      <div className="p-3.5 border-b border-[#30363d] flex items-start justify-between bg-black/20">
         <div className="flex-1 min-w-0 pr-2">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-sky-500/20 text-sky-400 border border-sky-500/30">
