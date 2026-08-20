@@ -113,17 +113,14 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     const rfEdges: Edge[] = rawEdges.map((edge: VisualGraphEdge) => {
       const isHighlighted = edge.highlight_state !== 'Normal' && edge.highlight_state !== 'Dimmed';
-      const isIndirect = edge.hop_depth !== undefined && edge.hop_depth >= 2;
 
-      let markerColor = '#4b5563';
+      let markerColor = '#475569';
       if (edge.highlight_state === 'InboundActive') {
-        markerColor = isIndirect ? '#818cf8' : '#38bdf8';
+        markerColor = '#38bdf8';
       } else if (edge.highlight_state === 'OutboundActive') {
-        markerColor = isIndirect ? '#fbbf24' : (edge.kind === 'GwtRpcCall' || edge.kind === 'GwtRpcBinding' ? '#e879f9' : '#fb923c');
+        markerColor = '#fb923c';
       } else if (edge.is_circular) {
         markerColor = '#ef4444';
-      } else if (edge.kind === 'GwtRpcCall' || edge.kind === 'GwtRpcBinding') {
-        markerColor = '#c084fc';
       }
 
       return {
@@ -134,11 +131,11 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         data: { ...edge },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          width: isIndirect ? 11 : isHighlighted ? 16 : 12,
-          height: isIndirect ? 11 : isHighlighted ? 16 : 12,
+          width: isHighlighted ? 14 : 10,
+          height: isHighlighted ? 14 : 10,
           color: markerColor,
         },
-        animated: isHighlighted && !isIndirect,
+        animated: false,
       };
     });
 

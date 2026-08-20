@@ -241,10 +241,20 @@ impl GraphAnalyzer {
                     let is_ext = boundary_ids.contains(&m.id);
 
                     if is_core || is_ext {
+                        let pkg_count = self.model.packages.iter().filter(|p| p.module_name == m.name || p.module_name == m.id).count();
+                        let class_count = self.model.classes.iter().filter(|c| c.module_name == m.name || c.module_name == m.id).count();
+                        let sub_label_str = if pkg_count > 0 || class_count > 0 {
+                            format!("{} pkgs • {} classes", pkg_count, class_count)
+                        } else if !m.exported_packages.is_empty() {
+                            format!("{} pkgs", m.exported_packages.len())
+                        } else {
+                            "0 pkgs".to_string()
+                        };
+
                         visual_nodes.push(VisualGraphNode {
                             id: m.id.clone(),
                             label: m.name.clone(),
-                            sub_label: Some(format!("{} pkgs", m.exported_packages.len())),
+                            sub_label: Some(sub_label_str),
                             category: "module".to_string(),
                             layer: None,
                             group: None,
