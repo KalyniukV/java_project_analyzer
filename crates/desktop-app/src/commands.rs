@@ -309,17 +309,27 @@ pub async fn delete_stored_project(
 // -------------------------------------------------------------
 
 #[tauri::command]
-pub async fn pick_folder() -> Result<Option<String>, String> {
-    let dialog_fut = rfd::AsyncFileDialog::new()
-        .set_title("Виберіть каталог Java проєкту")
-        .pick_folder();
+pub async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    use tauri_plugin_dialog::DialogExt;
+    use tokio::sync::oneshot;
 
-    let path = match tokio::time::timeout(std::time::Duration::from_secs(30), dialog_fut).await {
-        Ok(folder) => folder.map(|f| f.path().to_string_lossy().to_string()),
-        Err(_) => None,
-    };
+    let (tx, rx) = oneshot::channel();
 
-    Ok(path)
+    app.dialog().file().pick_folder(move |folder_path| {
+        let _ = tx.send(folder_path.map(|p| p.to_string()));
+    });
+
+    match rx.await {
+        Ok(res) => {
+            if let Some(ref p) = res {
+                println!("[IPC] 📁 pick_folder -> вибрано '{}'", p);
+            } else {
+                println!("[IPC] 📁 pick_folder -> діалог закрито без вибору");
+            }
+            Ok(res)
+        }
+        Err(_) => Ok(None),
+    }
 }
 
 #[tauri::command]
@@ -341,30 +351,21 @@ pub async fn browse_dirs(path: Option<String>) -> Result<BrowseDirResponse, Stri
             if p.is_dir() {
                 let name = entry.file_name().to_string_lossy().to_string();
 
+                // Skip hidden folders and heavy VCS/cache dirs
                 if name.starts_with('.') && name != ".javalens" {
                     continue;
                 }
+                if name == "node_modules" || name == "target" || name == "build" || name == "bin" || name == ".git" {
+                    continue;
+                }
 
+                // Instant O(1) checks without recursive WalkDir to prevent freezing on large directories
                 let pom_exists = p.join("pom.xml").exists();
-                let gradle_exists =
-                    p.join("build.gradle").exists() || p.join("build.gradle.kts").exists();
+                let gradle_exists = p.join("build.gradle").exists() || p.join("build.gradle.kts").exists();
                 let src_exists = p.join("src").exists();
-                let gwt_exists = walkdir::WalkDir::new(&p)
-                    .max_depth(4)
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                    .any(|e| {
-                        e.path()
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .map(|s| s.ends_with(".gwt.xml"))
-                            .unwrap_or(false)
-                    });
 
-                let is_java_project = pom_exists || gradle_exists || src_exists || gwt_exists;
-                let project_type = if gwt_exists {
-                    Some("gwt".to_string())
-                } else if pom_exists {
+                let is_java_project = pom_exists || gradle_exists || src_exists;
+                let project_type = if pom_exists {
                     Some("maven".to_string())
                 } else if gradle_exists {
                     Some("gradle".to_string())
@@ -390,6 +391,8 @@ pub async fn browse_dirs(path: Option<String>) -> Result<BrowseDirResponse, Stri
         (false, true) => std::cmp::Ordering::Less,
         _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
     });
+
+    println!("[IPC] 📂 browse_dirs('{}') -> {} каталогів (Java: {})", current_str, entries.len(), entries.iter().filter(|e| e.is_java_project).count());
 
     Ok(BrowseDirResponse {
         current_path: current_str,
