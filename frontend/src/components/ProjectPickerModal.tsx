@@ -42,7 +42,7 @@ export const ProjectPickerModal: React.FC<ProjectPickerModalProps> = ({
   onLoadFromNoSQL,
   isScanning,
 }) => {
-  const [modalTab, setModalTab] = useState<'explorer' | 'saved' | 'direct'>('explorer');
+  const [modalTab, setModalTab] = useState<'explorer' | 'saved' | 'direct'>('direct');
   const [storedProjects, setStoredProjects] = useState<StoredProjectSummary[]>([]);
   const [browseData, setBrowseData] = useState<BrowseDirResponse | null>(null);
   const [customPath, setCustomPath] = useState('');
@@ -52,20 +52,28 @@ export const ProjectPickerModal: React.FC<ProjectPickerModalProps> = ({
 
   const samplePath = 'fixtures/sample-petclinic';
 
-  // Load initial browse & stored list
+  // Load stored list when modal opens
   useEffect(() => {
     if (isOpen) {
       listStoredProjects().then(setStoredProjects).catch(console.error);
-      loadBrowse();
     }
   }, [isOpen]);
+
+  // Load file system explorer only when explorer tab is activated
+  useEffect(() => {
+    if (isOpen && modalTab === 'explorer' && !browseData) {
+      loadBrowse();
+    }
+  }, [isOpen, modalTab, browseData]);
 
   const loadBrowse = async (path?: string) => {
     try {
       setIsBrowsing(true);
       const data = await browseDirectories(path);
       setBrowseData(data);
-      setCustomPath(data.current_path);
+      if (!customPath) {
+        setCustomPath(data.current_path);
+      }
     } catch (err) {
       console.error('Browse error:', err);
     } finally {

@@ -316,104 +316,98 @@ pub async fn delete_stored_project(
 // -------------------------------------------------------------
 
 #[tauri::command]
-pub async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    use tauri_plugin_dialog::DialogExt;
-    use tokio::sync::oneshot;
+pub async fn pick_folder() -> Result<Option<String>, String> {
+    println!("[IPC] 📁 pick_folder -> відкриття системного діалогу вибору папки...");
+    let res = tokio::task::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("Виберіть каталог Java проєкту")
+            .pick_folder()
+            .map(|p| p.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("Dialog thread error: {}", e))?;
 
-    let (tx, rx) = oneshot::channel();
-
-    app.dialog().file().pick_folder(move |folder_path| {
-        let _ = tx.send(folder_path.map(|p| p.to_string()));
-    });
-
-    match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
-        Ok(Ok(res)) => {
-            if let Some(ref p) = res {
-                println!("[IPC] 📁 pick_folder -> вибрано '{}'", p);
-            } else {
-                println!("[IPC] 📁 pick_folder -> діалог закрито без вибору");
-            }
-            Ok(res)
-        }
-        _ => {
-            let fallback = tokio::task::spawn_blocking(|| {
-                rfd::FileDialog::new()
-                    .set_title("Виберіть каталог Java проєкту")
-                    .pick_folder()
-                    .map(|p| p.to_string_lossy().to_string())
-            }).await;
-            Ok(fallback.unwrap_or(None))
-        }
+    if let Some(ref p) = res {
+        println!("[IPC] 📁 pick_folder -> вибрано: '{}'", p);
+    } else {
+        println!("[IPC] 📁 pick_folder -> діалог закрито без вибору");
     }
+
+    Ok(res)
 }
 
 #[tauri::command]
 pub async fn browse_dirs(path: Option<String>) -> Result<BrowseDirResponse, String> {
-    let target_path = match path {
-        Some(p) if !p.trim().is_empty() => PathBuf::from(p),
-        _ => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-    };
+    tokio::task::spawn_blocking(move || {
+        let target_path = match path {
+            Some(p) if !p.trim().is_empty() => PathBuf::from(p),
+            _ => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        };
 
-    let canonical = target_path.canonicalize().unwrap_or(target_path.clone());
-    let current_str = canonical.to_string_lossy().to_string();
-    let parent_path = canonical.parent().map(|p| p.to_string_lossy().to_string());
+        let canonical = target_path.canonicalize().unwrap_or(target_path.clone());
+        let current_str = canonical.to_string_lossy().to_string();
+        let parent_path = canonical.parent().map(|p| p.to_string_lossy().to_string());
 
-    let mut entries = Vec::new();
+        let mut entries = Vec::new();
 
-    if let Ok(read_dir) = std::fs::read_dir(&canonical) {
-        for entry in read_dir.filter_map(|e| e.ok()) {
-            let p = entry.path();
-            if p.is_dir() {
-                let name = entry.file_name().to_string_lossy().to_string();
+        if let Ok(read_dir) = std::fs::read_dir(&canonical) {
+            for entry in read_dir.filter_map(|e| e.ok()) {
+                if let Ok(ft) = entry.file_type() {
+                    if ft.is_dir() {
+                        let name = entry.file_name().to_string_lossy().to_string();
 
-                // Skip hidden folders and heavy VCS/cache dirs
-                if name.starts_with('.') && name != ".javalens" {
-                    continue;
+                        // Skip hidden folders and heavy VCS/cache dirs
+                        if name.starts_with('.') && name != ".javalens" {
+                            continue;
+                        }
+                        if name == "node_modules" || name == "target" || name == "build" || name == "bin" || name == ".git" {
+                            continue;
+                        }
+
+                        let p = entry.path();
+                        let pom_exists = p.join("pom.xml").exists();
+                        let gradle_exists = p.join("build.gradle").exists() || p.join("build.gradle.kts").exists();
+                        let src_exists = p.join("src").exists();
+
+                        let is_java_project = pom_exists || gradle_exists || src_exists;
+                        let project_type = if pom_exists {
+                            Some("maven".to_string())
+                        } else if gradle_exists {
+                            Some("gradle".to_string())
+                        } else if src_exists {
+                            Some("java".to_string())
+                        } else {
+                            None
+                        };
+
+                        entries.push(DirEntryInfo {
+                            name,
+                            path: p.to_string_lossy().to_string(),
+                            is_dir: true,
+                            is_java_project,
+                            project_type,
+                        });
+                    }
                 }
-                if name == "node_modules" || name == "target" || name == "build" || name == "bin" || name == ".git" {
-                    continue;
-                }
-
-                // Instant O(1) checks without recursive WalkDir to prevent freezing on large directories
-                let pom_exists = p.join("pom.xml").exists();
-                let gradle_exists = p.join("build.gradle").exists() || p.join("build.gradle.kts").exists();
-                let src_exists = p.join("src").exists();
-
-                let is_java_project = pom_exists || gradle_exists || src_exists;
-                let project_type = if pom_exists {
-                    Some("maven".to_string())
-                } else if gradle_exists {
-                    Some("gradle".to_string())
-                } else if src_exists {
-                    Some("java".to_string())
-                } else {
-                    None
-                };
-
-                entries.push(DirEntryInfo {
-                    name,
-                    path: p.to_string_lossy().to_string(),
-                    is_dir: true,
-                    is_java_project,
-                    project_type,
-                });
             }
         }
-    }
 
-    entries.sort_by(|a, b| match (b.is_java_project, a.is_java_project) {
-        (true, false) => std::cmp::Ordering::Greater,
-        (false, true) => std::cmp::Ordering::Less,
-        _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-    });
+        entries.sort_by(|a, b| match (b.is_java_project, a.is_java_project) {
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, true) => std::cmp::Ordering::Less,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        });
 
-    println!("[IPC] 📂 browse_dirs('{}') -> {} каталогів (Java: {})", current_str, entries.len(), entries.iter().filter(|e| e.is_java_project).count());
+        println!("[IPC] 📂 browse_dirs('{}') -> {} каталогів (Java: {})", current_str, entries.len(), entries.iter().filter(|e| e.is_java_project).count());
 
-    Ok(BrowseDirResponse {
-        current_path: current_str,
-        parent_path,
-        entries,
+        Ok(BrowseDirResponse {
+            current_path: current_str,
+            parent_path,
+            entries,
+        })
     })
+    .await
+    .map_err(|e| format!("Browse error: {}", e))?
 }
 
 #[tauri::command]
