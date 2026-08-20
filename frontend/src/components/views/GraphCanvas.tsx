@@ -4,7 +4,7 @@ import cytoscape, { Core, EventObject } from 'cytoscape';
 import dagre from 'cytoscape-dagre';
 // @ts-ignore
 import fcose from 'cytoscape-fcose';
-import { VisualGraphPayload } from '../../types';
+import { VisualGraphPayload, VisualGraphEdge } from '../../types';
 import {
   Layers,
   Box,
@@ -148,9 +148,25 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     }
 
     const nodeIds = new Set(nodes.map((n) => n.id));
-    const edges = graphData.edges.filter((e) => nodeIds.has(e.source) && nodeIds.has(e.target));
+    const edgeMap = new Map<string, VisualGraphEdge>();
+    for (const e of graphData.edges) {
+      if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue;
+      const key = `${e.source}->${e.target}`;
+      if (!edgeMap.has(key)) {
+        edgeMap.set(key, { ...e });
+      } else {
+        const existing = edgeMap.get(key)!;
+        if (e.is_circular) existing.is_circular = true;
+        if (e.kind === 'Extends' || e.kind === 'Implements' || e.kind === 'GwtRpcBinding') {
+          existing.kind = e.kind;
+        }
+        if (e.label && existing.label && !existing.label.includes(e.label)) {
+          existing.label = `${existing.label}, ${e.label}`;
+        }
+      }
+    }
 
-    return { filteredNodes: nodes, filteredEdges: edges };
+    return { filteredNodes: nodes, filteredEdges: Array.from(edgeMap.values()) };
   }, [graphData, hideDTOs]);
 
   // -------------------------------------------------------------

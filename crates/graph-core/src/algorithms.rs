@@ -272,25 +272,34 @@ impl GraphAnalyzer {
 
                 let visible_ids: HashSet<&str> = visual_nodes.iter().map(|n| n.id.as_str()).collect();
 
+                let mut edge_map: HashMap<(String, String), VisualGraphEdge> = HashMap::new();
                 for rel in &self.model.relationships {
                     if rel.kind == RelationKind::ModuleDependency {
                         if visible_ids.contains(rel.source.as_str()) && visible_ids.contains(rel.target.as_str()) {
                             // If filtering with boundary, ensure at least one endpoint is in core_ids
                             if !has_filter || !include_external || core_ids.contains(&rel.source) || core_ids.contains(&rel.target) {
-                                visual_edges.push(VisualGraphEdge {
-                                    id: rel.id.clone(),
-                                    source: rel.source.clone(),
-                                    target: rel.target.clone(),
-                                    label: rel.description.clone(),
-                                    kind: rel.kind.clone(),
-                                    highlight_state: EdgeHighlightState::Normal,
-                                    is_circular: rel.is_circular,
-                                    hop_depth: None,
-                                });
+                                let key = (rel.source.clone(), rel.target.clone());
+                                if let Some(existing) = edge_map.get_mut(&key) {
+                                    if rel.is_circular {
+                                        existing.is_circular = true;
+                                    }
+                                } else {
+                                    edge_map.insert(key, VisualGraphEdge {
+                                        id: rel.id.clone(),
+                                        source: rel.source.clone(),
+                                        target: rel.target.clone(),
+                                        label: rel.description.clone(),
+                                        kind: rel.kind.clone(),
+                                        highlight_state: EdgeHighlightState::Normal,
+                                        is_circular: rel.is_circular,
+                                        hop_depth: None,
+                                    });
+                                }
                             }
                         }
                     }
                 }
+                visual_edges.extend(edge_map.into_values());
             }
             "packages" => {
                 let mut core_ids: HashSet<String> = HashSet::new();
@@ -373,24 +382,33 @@ impl GraphAnalyzer {
 
                 let visible_ids: HashSet<&str> = visual_nodes.iter().map(|n| n.id.as_str()).collect();
 
+                let mut edge_map: HashMap<(String, String), VisualGraphEdge> = HashMap::new();
                 for rel in &self.model.relationships {
                     if rel.kind == RelationKind::PackageDependency {
                         if visible_ids.contains(rel.source.as_str()) && visible_ids.contains(rel.target.as_str()) {
                             if !has_filter || !include_external || core_ids.contains(&rel.source) || core_ids.contains(&rel.target) {
-                                visual_edges.push(VisualGraphEdge {
-                                    id: rel.id.clone(),
-                                    source: rel.source.clone(),
-                                    target: rel.target.clone(),
-                                    label: rel.description.clone(),
-                                    kind: rel.kind.clone(),
-                                    highlight_state: EdgeHighlightState::Normal,
-                                    is_circular: rel.is_circular,
-                                    hop_depth: None,
-                                });
+                                let key = (rel.source.clone(), rel.target.clone());
+                                if let Some(existing) = edge_map.get_mut(&key) {
+                                    if rel.is_circular {
+                                        existing.is_circular = true;
+                                    }
+                                } else {
+                                    edge_map.insert(key, VisualGraphEdge {
+                                        id: rel.id.clone(),
+                                        source: rel.source.clone(),
+                                        target: rel.target.clone(),
+                                        label: rel.description.clone(),
+                                        kind: rel.kind.clone(),
+                                        highlight_state: EdgeHighlightState::Normal,
+                                        is_circular: rel.is_circular,
+                                        hop_depth: None,
+                                    });
+                                }
                             }
                         }
                     }
                 }
+                visual_edges.extend(edge_map.into_values());
             }
             _ => {
                 // "classes" view
@@ -493,26 +511,38 @@ impl GraphAnalyzer {
 
                 let visible_ids: HashSet<&str> = visual_nodes.iter().map(|n| n.id.as_str()).collect();
 
+                let mut edge_map: HashMap<(String, String), VisualGraphEdge> = HashMap::new();
                 for rel in &self.model.relationships {
                     if rel.kind != RelationKind::ModuleDependency
                         && rel.kind != RelationKind::PackageDependency
                     {
                         if visible_ids.contains(rel.source.as_str()) && visible_ids.contains(rel.target.as_str()) {
                             if !has_filter || !include_external || core_ids.contains(&rel.source) || core_ids.contains(&rel.target) {
-                                visual_edges.push(VisualGraphEdge {
-                                    id: rel.id.clone(),
-                                    source: rel.source.clone(),
-                                    target: rel.target.clone(),
-                                    label: rel.description.clone(),
-                                    kind: rel.kind.clone(),
-                                    highlight_state: EdgeHighlightState::Normal,
-                                    is_circular: rel.is_circular,
-                                    hop_depth: None,
-                                });
+                                let key = (rel.source.clone(), rel.target.clone());
+                                if let Some(existing) = edge_map.get_mut(&key) {
+                                    if rel.is_circular {
+                                        existing.is_circular = true;
+                                    }
+                                    if rel.kind == RelationKind::Extends || rel.kind == RelationKind::Implements || rel.kind == RelationKind::GwtRpcBinding {
+                                        existing.kind = rel.kind.clone();
+                                    }
+                                } else {
+                                    edge_map.insert(key, VisualGraphEdge {
+                                        id: rel.id.clone(),
+                                        source: rel.source.clone(),
+                                        target: rel.target.clone(),
+                                        label: rel.description.clone(),
+                                        kind: rel.kind.clone(),
+                                        highlight_state: EdgeHighlightState::Normal,
+                                        is_circular: rel.is_circular,
+                                        hop_depth: None,
+                                    });
+                                }
                             }
                         }
                     }
                 }
+                visual_edges.extend(edge_map.into_values());
             }
         }
 
