@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ProjectModel, DirEntryInfo, BrowseDirResponse } from '../types';
+import { StoredProjectSummary, DirEntryInfo, BrowseDirResponse } from '../types';
 import {
   listStoredProjects,
   deleteStoredProject,
@@ -43,7 +43,7 @@ export const ProjectPickerModal: React.FC<ProjectPickerModalProps> = ({
   isScanning,
 }) => {
   const [modalTab, setModalTab] = useState<'explorer' | 'saved' | 'direct'>('explorer');
-  const [storedProjects, setStoredProjects] = useState<ProjectModel[]>([]);
+  const [storedProjects, setStoredProjects] = useState<StoredProjectSummary[]>([]);
   const [browseData, setBrowseData] = useState<BrowseDirResponse | null>(null);
   const [customPath, setCustomPath] = useState('');
   const [isBrowsing, setIsBrowsing] = useState(false);
@@ -331,7 +331,7 @@ export const ProjectPickerModal: React.FC<ProjectPickerModalProps> = ({
                             {p.project_name}
                           </span>
                           <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                            {p.classes.length} класів • {p.modules.length} модулів • {p.relationships.length} зв'язків
+                            {p.classes_count} класів • {p.modules_count} модулів • {p.relationships_count} зв'язків
                           </span>
                         </div>
                         <p className="text-xs font-mono text-slate-400 truncate" title={p.root_path}>

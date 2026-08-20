@@ -141,6 +141,16 @@ export interface ProjectModel {
   scan_time_ms: number;
 }
 
+export interface StoredProjectSummary {
+  project_name: string;
+  root_path: string;
+  modules_count: number;
+  packages_count: number;
+  classes_count: number;
+  relationships_count: number;
+  scan_time_ms: number;
+}
+
 export type NodeHighlightState =
   | 'Normal'
   | 'Selected'

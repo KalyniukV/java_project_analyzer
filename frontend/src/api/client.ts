@@ -13,6 +13,7 @@ import {
   CallHierarchyGraph,
   ScanProgress,
   ClassInfo,
+  StoredProjectSummary,
 } from '../types';
 
 async function invokeWithLog<T>(cmd: string, args?: Record<string, any>): Promise<T> {
@@ -69,8 +70,8 @@ export async function getClassDetail(target: string): Promise<ClassInfo | null> 
   return invokeWithLog<ClassInfo | null>('get_class_detail', { target });
 }
 
-export async function listStoredProjects(): Promise<ProjectModel[]> {
-  return invokeWithLog<ProjectModel[]>('list_stored_projects');
+export async function listStoredProjects(): Promise<StoredProjectSummary[]> {
+  return invokeWithLog<StoredProjectSummary[]>('list_stored_projects');
 }
 
 export async function loadStoredProject(rootPath: string): Promise<ProjectModel> {

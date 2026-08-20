@@ -269,10 +269,17 @@ pub async fn get_cycles(
 #[tauri::command]
 pub async fn list_stored_projects(
     state: tauri::State<'_, AppState>,
-) -> Result<Vec<ProjectModel>, String> {
+) -> Result<Vec<graph_core::models::StoredProjectSummary>, String> {
+    let start = std::time::Instant::now();
     match state.storage.list_projects() {
-        Ok(projects) => Ok(projects),
-        Err(e) => Err(format!("Failed to list stored projects: {}", e)),
+        Ok(projects) => {
+            println!("[IPC] 💾 list_stored_projects() -> {} збережених проєктів ({}мс)", projects.len(), start.elapsed().as_millis());
+            Ok(projects)
+        }
+        Err(e) => {
+            eprintln!("[IPC] ❌ list_stored_projects error: {}", e);
+            Err(format!("Failed to list stored projects: {}", e))
+        }
     }
 }
 
@@ -319,8 +326,8 @@ pub async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String
         let _ = tx.send(folder_path.map(|p| p.to_string()));
     });
 
-    match rx.await {
-        Ok(res) => {
+    match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
+        Ok(Ok(res)) => {
             if let Some(ref p) = res {
                 println!("[IPC] 📁 pick_folder -> вибрано '{}'", p);
             } else {
@@ -328,7 +335,15 @@ pub async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String
             }
             Ok(res)
         }
-        Err(_) => Ok(None),
+        _ => {
+            let fallback = tokio::task::spawn_blocking(|| {
+                rfd::FileDialog::new()
+                    .set_title("Виберіть каталог Java проєкту")
+                    .pick_folder()
+                    .map(|p| p.to_string_lossy().to_string())
+            }).await;
+            Ok(fallback.unwrap_or(None))
+        }
     }
 }
 

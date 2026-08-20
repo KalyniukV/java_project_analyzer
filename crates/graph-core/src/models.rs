@@ -171,6 +171,17 @@ pub struct ProjectModel {
     pub scan_time_ms: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct StoredProjectSummary {
+    pub project_name: String,
+    pub root_path: String,
+    pub modules_count: usize,
+    pub packages_count: usize,
+    pub classes_count: usize,
+    pub relationships_count: usize,
+    pub scan_time_ms: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum NodeHighlightState {
     Normal,
