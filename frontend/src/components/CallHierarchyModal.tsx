@@ -52,15 +52,15 @@ const CallHierarchyFlowNode = memo(({ data }: NodeProps<any>) => {
   const getLayerBadge = (layer: string) => {
     switch (layer) {
       case 'UI':
-        return 'bg-rose-500/20 text-rose-300 border-rose-500/40';
+        return 'bg-teal-700 text-white border-teal-500';
       case 'Service':
-        return 'bg-amber-500/20 text-amber-300 border-amber-500/40';
+        return 'bg-blue-700 text-white border-blue-500';
       case 'Domain':
-        return 'bg-blue-500/20 text-blue-300 border-blue-500/40';
+        return 'bg-amber-700 text-white border-amber-500';
       case 'Infrastructure':
-        return 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40';
+        return 'bg-indigo-700 text-white border-indigo-500';
       default:
-        return 'bg-slate-500/20 text-slate-300 border-slate-500/40';
+        return 'bg-slate-700 text-white border-slate-500';
     }
   };
 
@@ -69,47 +69,62 @@ const CallHierarchyFlowNode = memo(({ data }: NodeProps<any>) => {
       return 'bg-purple-500 text-slate-950 font-bold';
     }
     if (node.depth < 0) {
-      return 'bg-sky-500/20 text-sky-300 border border-sky-500/30';
+      return 'bg-sky-500/30 text-[#38bdf8] border border-sky-500/50 font-bold';
     }
-    return 'bg-amber-500/20 text-amber-300 border border-amber-500/30';
+    return 'bg-amber-500/30 text-[#fb923c] border border-amber-500/50 font-bold';
   };
 
   let borderClass = isRoot
-    ? 'border-purple-500 bg-[#161b22] ring-2 ring-purple-500/50 shadow-2xl shadow-purple-500/20'
+    ? 'border-2 border-[#c084fc] bg-[#1e172e] shadow-2xl ring-2 ring-purple-400/40'
     : node.depth < 0
-    ? 'border-[#30363d] hover:border-sky-500/60 bg-[#0d1117]/95'
-    : 'border-[#30363d] hover:border-amber-500/60 bg-[#0d1117]/95';
+    ? 'border-2 border-[#38bdf8] bg-[#0c2d48] hover:border-sky-300 shadow-md'
+    : 'border-2 border-[#fb923c] bg-[#3d1a04] hover:border-amber-300 shadow-md';
 
   return (
     <div
       onClick={() => !isRoot && onSelect(node.id)}
-      className={`min-w-[220px] max-w-[260px] rounded-xl border p-3 shadow-xl backdrop-blur-md transition-all duration-200 cursor-pointer ${borderClass}`}
+      className={`w-[280px] rounded-xl border p-3 shadow-xl transition-all duration-150 cursor-pointer ${borderClass}`}
     >
       <Handle
         type="target"
         position={Position.Left}
-        className="!bg-[#38bdf8] !w-2.5 !h-2.5 !border-2 !border-[#0d1117]"
+        className="!bg-[#38bdf8] !w-3 !h-3 !border-2 !border-[#0d1117] !-left-1.5"
       />
 
       <div className="flex items-center justify-between gap-1.5 mb-1.5">
-        <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full ${getHopBadge()}`}>
+        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full ${getHopBadge()}`}>
           {isRoot ? '★ ROOT' : node.depth < 0 ? `Hop ${node.depth}` : `Hop +${node.depth}`}
         </span>
-        <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${getLayerBadge(node.layer)}`}>
+        <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-bold ${getLayerBadge(node.layer)}`}>
           {node.layer}
         </span>
       </div>
 
-      <div className="text-xs font-bold font-mono text-slate-100 truncate" title={node.name}>
+      {/* Method Name - Pure White and High Contrast */}
+      <div
+        className="text-[14px] font-bold font-mono text-white truncate tracking-wide mt-1"
+        style={{ color: '#ffffff' }}
+        title={node.name}
+      >
         {node.name}{node.member_type === 'method' ? '()' : ''}
       </div>
 
-      <div className="text-[10px] font-mono text-slate-400 truncate mt-0.5" title={node.declaring_class}>
+      {/* Declaring Class Name */}
+      <div
+        className="text-[11px] font-mono truncate mt-0.5"
+        style={{ color: '#bae6fd' }}
+        title={node.declaring_class}
+      >
         📁 {node.class_simple_name}
       </div>
 
+      {/* Signature / Return Type */}
       {node.return_or_field_type && (
-        <div className="text-[10px] font-mono text-sky-400 truncate mt-1 bg-black/30 px-1.5 py-0.5 rounded">
+        <div
+          className="text-[10px] font-mono truncate mt-1 bg-black/60 px-2 py-0.5 rounded border border-white/10"
+          style={{ color: '#f8fafc' }}
+          title={node.return_or_field_type}
+        >
           {node.member_type === 'method' ? `➔ ${node.return_or_field_type}` : `type: ${node.return_or_field_type}`}
         </div>
       )}
@@ -117,7 +132,7 @@ const CallHierarchyFlowNode = memo(({ data }: NodeProps<any>) => {
       <Handle
         type="source"
         position={Position.Right}
-        className="!bg-[#fb923c] !w-2.5 !h-2.5 !border-2 !border-[#0d1117]"
+        className="!bg-[#fb923c] !w-3 !h-3 !border-2 !border-[#0d1117] !-right-1.5"
       />
     </div>
   );
@@ -558,24 +573,35 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
                           <div
                             key={node.id}
                             onClick={() => setActiveTarget(node.id)}
-                            className="p-3 rounded-xl bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] hover:border-sky-500/50 transition-all cursor-pointer group shadow-sm"
+                            className="p-3 rounded-xl bg-[#161f2e] hover:bg-[#1e293b] border-2 border-[#38bdf8]/30 hover:border-sky-400 transition-all cursor-pointer group shadow-md"
                           >
                             <div className="flex items-center justify-between gap-1 mb-1">
-                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-sky-500/20 text-[#38bdf8] border border-sky-500/40 font-bold">
                                 Hop {node.depth}
                               </span>
-                              <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${getLayerBadge(node.layer)}`}>
+                              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border font-bold ${getLayerBadge(node.layer)}`}>
                                 {node.layer}
                               </span>
                             </div>
-                            <p className="text-xs font-bold font-mono text-slate-200 group-hover:text-sky-300 truncate" title={node.name}>
+                            <p
+                              className="text-[13px] font-bold font-mono text-white truncate"
+                              style={{ color: '#ffffff' }}
+                              title={node.name}
+                            >
                               {node.name}()
                             </p>
-                            <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5" title={node.declaring_class}>
-                              {node.class_simple_name}
+                            <p
+                              className="text-[11px] font-mono truncate mt-0.5"
+                              style={{ color: '#bae6fd' }}
+                              title={node.declaring_class}
+                            >
+                              📁 {node.class_simple_name}
                             </p>
                             {node.signature && (
-                              <p className="text-[10px] font-mono text-slate-400 truncate mt-1 bg-black/30 px-1.5 py-0.5 rounded">
+                              <p
+                                className="text-[10px] font-mono truncate mt-1 bg-black/60 px-1.5 py-0.5 rounded border border-white/10"
+                                style={{ color: '#f8fafc' }}
+                              >
                                 {node.signature}
                               </p>
                             )}
@@ -587,25 +613,33 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
                 )}
 
                 {/* Column 2: Target Root Member */}
-                <div className="space-y-3 bg-[#161b22] p-5 rounded-2xl border-2 border-purple-500/60 shadow-xl shadow-purple-500/5 relative">
+                <div className="space-y-3 bg-[#1e172e] p-5 rounded-2xl border-2 border-purple-400 shadow-xl relative">
                   <div className="absolute -top-3 left-4 px-2.5 py-0.5 rounded-full bg-purple-500 text-slate-950 text-[10px] font-mono font-bold uppercase shadow">
                     Цільовий елемент (Root)
                   </div>
 
                   <div className="pt-2">
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${getLayerBadge(rootNode?.layer || 'Unknown')}`}>
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-bold ${getLayerBadge(rootNode?.layer || 'Unknown')}`}>
                       {rootNode?.layer || 'Element'}
                     </span>
-                    <h3 className="text-base font-bold font-mono text-slate-100 mt-2 truncate" title={rootNode?.name}>
+                    <h3
+                      className="text-base font-bold font-mono text-white mt-2 truncate"
+                      style={{ color: '#ffffff' }}
+                      title={rootNode?.name}
+                    >
                       {rootNode?.name}
                     </h3>
-                    <p className="text-xs font-mono text-slate-400 truncate mt-0.5" title={rootNode?.declaring_class}>
+                    <p
+                      className="text-xs font-mono truncate mt-0.5"
+                      style={{ color: '#bae6fd' }}
+                      title={rootNode?.declaring_class}
+                    >
                       📁 {rootNode?.declaring_class}
                     </p>
                   </div>
 
                   {rootNode?.signature && (
-                    <div className="bg-[#0d1117] p-3 rounded-xl border border-[#30363d] text-xs font-mono text-purple-300">
+                    <div className="bg-[#0d1117] p-3 rounded-xl border border-[#30363d] text-xs font-mono" style={{ color: '#e2e8f0' }}>
                       <span className="text-slate-400 text-[10px] block mb-1">Сигнатура:</span>
                       <span className="break-all">{rootNode.signature}</span>
                     </div>
@@ -617,9 +651,9 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
                         onNavigateToClass(rootNode.declaring_class);
                         onClose();
                       }}
-                      className="w-full py-2 rounded-xl bg-purple-500/15 hover:bg-purple-500/25 text-purple-300 border border-purple-500/30 text-xs font-semibold transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                      className="w-full py-2 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-500/40 text-xs font-semibold transition-all flex items-center justify-center gap-1.5 shadow-sm"
                     >
-                      <Target className="w-3.5 h-3.5 text-purple-400" />
+                      <Target className="w-3.5 h-3.5 text-purple-300" />
                       Перейти до класу на графі
                     </button>
                   )}
@@ -647,24 +681,35 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
                           <div
                             key={node.id}
                             onClick={() => setActiveTarget(node.id)}
-                            className="p-3 rounded-xl bg-[#161b22] hover:bg-[#21262d] border border-[#30363d] hover:border-amber-500/50 transition-all cursor-pointer group shadow-sm"
+                            className="p-3 rounded-xl bg-[#161f2e] hover:bg-[#1e293b] border-2 border-[#fb923c]/30 hover:border-amber-400 transition-all cursor-pointer group shadow-md"
                           >
                             <div className="flex items-center justify-between gap-1 mb-1">
-                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                              <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-[#fb923c] border border-amber-500/40 font-bold">
                                 Hop +{node.depth}
                               </span>
-                              <span className={`text-[9px] font-mono px-1.5 py-0.2 rounded border ${getLayerBadge(node.layer)}`}>
+                              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded border font-bold ${getLayerBadge(node.layer)}`}>
                                 {node.layer}
                               </span>
                             </div>
-                            <p className="text-xs font-bold font-mono text-slate-200 group-hover:text-amber-300 truncate" title={node.name}>
+                            <p
+                              className="text-[13px] font-bold font-mono text-white truncate"
+                              style={{ color: '#ffffff' }}
+                              title={node.name}
+                            >
                               {node.name}{node.member_type === 'method' ? '()' : ''}
                             </p>
-                            <p className="text-[11px] font-mono text-slate-400 truncate mt-0.5" title={node.declaring_class}>
-                              {node.class_simple_name}
+                            <p
+                              className="text-[11px] font-mono truncate mt-0.5"
+                              style={{ color: '#bae6fd' }}
+                              title={node.declaring_class}
+                            >
+                              📁 {node.class_simple_name}
                             </p>
                             {node.signature && (
-                              <p className="text-[10px] font-mono text-slate-400 truncate mt-1 bg-black/30 px-1.5 py-0.5 rounded">
+                              <p
+                                className="text-[10px] font-mono truncate mt-1 bg-black/60 px-1.5 py-0.5 rounded border border-white/10"
+                                style={{ color: '#f8fafc' }}
+                              >
                                 {node.signature}
                               </p>
                             )}
