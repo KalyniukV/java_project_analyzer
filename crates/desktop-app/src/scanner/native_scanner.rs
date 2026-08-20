@@ -661,6 +661,18 @@ impl NativeJavaScanner {
 
         model.packages = package_map.into_values().collect();
         model.relationships = relationships;
+
+        // Filter out empty non-code modules (e.g. parent POMs, BOMs, doc folders)
+        let populated_mod_names: HashSet<String> = model.classes.iter().map(|c| c.module_name.clone()).filter(|m| !m.is_empty()).collect();
+        if !populated_mod_names.is_empty() {
+            model.modules.retain(|m| populated_mod_names.contains(&m.name) || populated_mod_names.contains(&m.id));
+        }
+
+        // Deduplicate modules by ID and sort alphabetically
+        let mut seen_mod_ids = HashSet::new();
+        model.modules.retain(|m| seen_mod_ids.insert(m.id.clone()));
+        model.modules.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
         model.scan_time_ms = start_time.elapsed().as_millis() as u64;
 
         add_log(
@@ -702,6 +714,7 @@ impl NativeJavaScanner {
         let mut found_modules = Vec::new();
         let mut discovered_paths = HashSet::new();
 
+        let parent_tag_regex = Regex::new(r"(?s)<parent>.*?</parent>").unwrap();
         let artifact_id_regex = Regex::new(r"<artifactId>([^<]+)</artifactId>").unwrap();
 
         // 1. Walk entire project tree to discover all pom.xml, build.gradle, and build.gradle.kts
@@ -737,11 +750,11 @@ impl NativeJavaScanner {
                         .unwrap_or("module")
                         .to_string();
 
-                    // If it's a pom.xml, extract artifactId if available
+                    // If it's a pom.xml, extract the module's OWN artifactId (ignoring parent artifactId)
                     if is_pom {
                         if let Ok(content) = fs::read_to_string(entry.path()) {
-                            // First artifactId or submodule name
-                            if let Some(cap) = artifact_id_regex.captures(&content) {
+                            let content_no_parent = parent_tag_regex.replace_all(&content, "");
+                            if let Some(cap) = artifact_id_regex.captures(&content_no_parent) {
                                 if let Some(a_id) = cap.get(1) {
                                     let parsed_name = a_id.as_str().trim();
                                     if !parsed_name.is_empty() {
@@ -817,7 +830,6 @@ impl NativeJavaScanner {
         if found_modules.len() > 1 {
             found_modules.retain(|m| {
                 if m.path == root_dir.to_string_lossy() {
-                    // Check if root directly has src/main/java
                     let root_src = root_dir.join("src").join("main").join("java");
                     root_src.exists()
                 } else {
@@ -845,7 +857,24 @@ impl NativeJavaScanner {
             });
         }
 
-        // Sort modules by path length descending so most specific nested submodules match first
+        // Disambiguate duplicate names if multiple folders have identical artifactIds
+        let mut name_counts: HashMap<String, usize> = HashMap::new();
+        for m in &found_modules {
+            *name_counts.entry(m.name.clone()).or_default() += 1;
+        }
+        for m in &mut found_modules {
+            if name_counts.get(&m.name).copied().unwrap_or(0) > 1 {
+                if let Ok(rel) = Path::new(&m.path).strip_prefix(root_dir) {
+                    let rel_str = rel.to_string_lossy().replace('\\', "/");
+                    if !rel_str.is_empty() {
+                        m.name = rel_str.clone();
+                        m.id = rel_str;
+                    }
+                }
+            }
+        }
+
+        // Sort modules by path length descending so most specific nested submodules match first during file scan
         found_modules.sort_by(|a, b| b.path.len().cmp(&a.path.len()));
 
         model.modules = found_modules;

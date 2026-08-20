@@ -186,9 +186,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   if (!project) return null;
 
-  const modulesList = project.modules.length > 0
-    ? (hasModuleFilter ? project.modules.filter(m => selectedModules.includes(m.id)) : project.modules)
-    : [{ id: 'default', name: project.project_name, path: '', build_type: '', direct_dependencies: [], exported_packages: [], afferent_coupling: 0, efferent_coupling: 0, instability: 0 }];
+  const modulesList = useMemo(() => {
+    if (!project) return [];
+    const raw = project.modules.length > 0
+      ? (hasModuleFilter ? project.modules.filter(m => selectedModules.includes(m.id)) : project.modules)
+      : [{ id: 'default', name: project.project_name, path: '', build_type: '', direct_dependencies: [], exported_packages: [], afferent_coupling: 0, efferent_coupling: 0, instability: 0 }];
+
+    const seen = new Set<string>();
+    return raw.filter(m => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  }, [project, hasModuleFilter, selectedModules]);
 
   return (
     <div
