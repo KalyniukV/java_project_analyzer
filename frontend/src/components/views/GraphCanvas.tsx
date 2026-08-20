@@ -86,7 +86,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   }, [graphData, hideDTOs]);
 
   // -------------------------------------------------------------
-  // Run layout algorithm
+  // Run layout algorithm (only on initial load or layout switch)
   // -------------------------------------------------------------
   const runLayout = (cy: Core, mode: string) => {
     let layoutOptions: any;
@@ -99,7 +99,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         rankSep: 80,
         edgeSep: 30,
         animate: true,
-        animationDuration: 350,
+        animationDuration: 300,
         fit: true,
         padding: 50,
       };
@@ -109,7 +109,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         quality: 'proof',
         randomize: false,
         animate: true,
-        animationDuration: 350,
+        animationDuration: 300,
         fit: true,
         padding: 50,
         nodeSeparation: 80,
@@ -143,7 +143,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   };
 
   // -------------------------------------------------------------
-  // Initialize and update Cytoscape instance
+  // Initialize Cytoscape instance on structure change
   // -------------------------------------------------------------
   useEffect(() => {
     if (!containerRef.current) return;
@@ -224,7 +224,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             'text-outline-color': '#0d1117',
             'text-outline-width': '2px',
             'transition-property': 'background-color, border-color, border-width, opacity',
-            'transition-duration': 0.2,
+            'transition-duration': 0.15,
           } as any,
         },
         // Controllers / UI Layer
@@ -283,32 +283,45 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         },
         // SELECTED NODE STYLING
         {
-          selector: 'node:selected, node.selected',
+          selector: 'node.selected',
           style: {
             'border-color': '#a855f7',
             'border-width': '4px',
             'background-color': '#2e1065',
-            'shadow-blur': 15,
+            'shadow-blur': 20,
             'shadow-color': '#a855f7',
-            'shadow-opacity': 0.8,
+            'shadow-opacity': 0.9,
             'z-index': 999,
+            'opacity': 1,
           } as any,
+        },
+        // Inbound caller neighbors (Who calls selected)
+        {
+          selector: 'node.neighbor-in',
+          style: {
+            'border-color': '#38bdf8',
+            'border-width': '3.5px',
+            'background-color': '#0c4a6e',
+            'opacity': 1,
+            'z-index': 500,
+          },
+        },
+        // Outbound callee neighbors (Who selected calls)
+        {
+          selector: 'node.neighbor-out',
+          style: {
+            'border-color': '#fbbf24',
+            'border-width': '3.5px',
+            'background-color': '#451a03',
+            'opacity': 1,
+            'z-index': 500,
+          },
         },
         // Dimmed when another node is selected in active mode
         {
           selector: 'node.dimmed',
           style: {
-            'opacity': 0.15,
-          },
-        },
-        // Connected Neighbor Nodes
-        {
-          selector: 'node.highlighted',
-          style: {
-            'border-color': '#38bdf8',
-            'border-width': '3px',
-            'opacity': 1,
-            'z-index': 500,
+            'opacity': 0.12,
           },
         },
 
@@ -324,7 +337,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             'arrow-scale': 1.2,
             'opacity': 0.65,
             'transition-property': 'line-color, target-arrow-color, width, opacity',
-            'transition-duration': 0.2,
+            'transition-duration': 0.15,
           } as any,
         },
         // Extends / Implements
@@ -374,14 +387,25 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             'opacity': 0.9,
           },
         },
-        // Active Highlighted Edge
+        // Active Inbound Highlighted Edge (Calls INTO selected)
         {
-          selector: 'edge.highlighted',
+          selector: 'edge.inbound-edge',
           style: {
-            'width': 3.5,
+            'width': 4,
             'opacity': 1,
             'line-color': '#38bdf8',
             'target-arrow-color': '#38bdf8',
+            'z-index': 800,
+          },
+        },
+        // Active Outbound Highlighted Edge (Calls OUT FROM selected)
+        {
+          selector: 'edge.outbound-edge',
+          style: {
+            'width': 4,
+            'opacity': 1,
+            'line-color': '#fbbf24',
+            'target-arrow-color': '#fbbf24',
             'z-index': 800,
           },
         },
@@ -389,7 +413,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         {
           selector: 'edge.dimmed',
           style: {
-            'opacity': 0.05,
+            'opacity': 0.04,
           },
         },
       ],
@@ -427,35 +451,45 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   }, [filteredNodes, filteredEdges, activeView]);
 
   // -------------------------------------------------------------
-  // Handle Highlight and Active Node Changes
+  // Pure Visual Selection Effect (ZERO RESHUFFLE, INSTANT STYLING)
   // -------------------------------------------------------------
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
 
     cy.batch(() => {
-      cy.elements().removeClass('selected highlighted dimmed');
+      cy.elements().removeClass('selected inbound-edge outbound-edge neighbor-in neighbor-out dimmed');
 
       if (selectedNodeId) {
         const selectedNode = cy.getElementById(selectedNodeId);
         if (selectedNode.length > 0) {
           selectedNode.addClass('selected');
 
-          if (onlyActiveEdges) {
-            const connectedEdges = selectedNode.connectedEdges();
-            const neighbors = connectedEdges.connectedNodes();
+          const inEdges = selectedNode.incomers('edge');
+          const outEdges = selectedNode.outgoers('edge');
+          const inNodes = selectedNode.incomers('node');
+          const outNodes = selectedNode.outgoers('node');
 
+          if (onlyActiveEdges) {
             cy.elements().addClass('dimmed');
             selectedNode.removeClass('dimmed');
-            neighbors.removeClass('dimmed').addClass('highlighted');
-            connectedEdges.removeClass('dimmed').addClass('highlighted');
+
+            inNodes.removeClass('dimmed').addClass('neighbor-in');
+            outNodes.removeClass('dimmed').addClass('neighbor-out');
+            inEdges.removeClass('dimmed').addClass('inbound-edge');
+            outEdges.removeClass('dimmed').addClass('outbound-edge');
+          } else {
+            inNodes.addClass('neighbor-in');
+            outNodes.addClass('neighbor-out');
+            inEdges.addClass('inbound-edge');
+            outEdges.addClass('outbound-edge');
           }
         }
       }
     });
   }, [selectedNodeId, onlyActiveEdges]);
 
-  // Switch layout mode
+  // Switch layout mode explicitly
   const handleLayoutChange = (mode: 'dagre' | 'fcose' | 'grid' | 'concentric') => {
     setLayoutMode(mode);
     if (cyRef.current) {
@@ -471,7 +505,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           eles: cyRef.current.elements(),
           padding: 50,
         },
-        duration: 350,
+        duration: 300,
       });
     }
   };
@@ -665,11 +699,19 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         </button>
       </div>
 
-      {/* BOTTOM-RIGHT METRICS COUNTER */}
-      <div className="absolute bottom-4 right-4 bg-[#161b22]/90 border border-[#30363d] px-3 py-1.5 rounded-xl shadow-2xl backdrop-blur-md z-20 text-[11px] font-mono text-slate-400 flex items-center gap-3 pointer-events-none">
-        <span>Вузлів: <b className="text-slate-200">{filteredNodes.length}</b></span>
-        <span>Зв'язків: <b className="text-slate-200">{filteredEdges.length}</b></span>
-        <span className="text-emerald-400 font-bold">⚡ 60 FPS (Canvas)</span>
+      {/* BOTTOM-RIGHT METRICS COUNTER & VISUAL LEGEND */}
+      <div className="absolute bottom-4 right-4 z-20 pointer-events-none flex items-center gap-2">
+        <div className="px-3 py-1.5 rounded-xl bg-[#161b22]/95 border border-[#30363d] text-[11px] font-mono shadow-2xl backdrop-blur-md flex items-center gap-3">
+          <span className="flex items-center gap-1.5 text-sky-300 font-bold">
+            <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
+            <span>⬅ Вхідні</span>
+          </span>
+          <span className="flex items-center gap-1.5 text-amber-300 font-bold">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+            <span>➡ Вихідні</span>
+          </span>
+          <span className="text-emerald-400 font-bold">⚡ 60 FPS (Canvas)</span>
+        </div>
       </div>
     </div>
   );

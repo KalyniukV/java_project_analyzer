@@ -168,14 +168,14 @@ export function App() {
     };
   }, []);
 
-  // Fetch updated graph when tab, selected node, depth, isolate mode, module/package filters, or external toggle change
+  // Fetch updated graph when tab, module/package filters, or external toggle change
   useEffect(() => {
     let isMounted = true;
 
     if (activeTab === 'modules' || activeTab === 'packages' || activeTab === 'classes') {
       getGraph(
         activeTab,
-        selectedNodeId || undefined,
+        undefined,
         depth,
         isolateMode,
         selectedModules.length > 0 ? selectedModules : undefined,
@@ -195,7 +195,7 @@ export function App() {
     return () => {
       isMounted = false;
     };
-  }, [activeTab, selectedNodeId, depth, isolateMode, selectedModules, selectedPackages, includeExternal]);
+  }, [activeTab, depth, isolateMode, selectedModules, selectedPackages, includeExternal]);
 
   // Handle node selection from graph or sidebar
   const handleSelectNode = (nodeId: string) => {
