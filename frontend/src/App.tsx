@@ -17,7 +17,7 @@ export function App() {
   const [project, setProject] = useState<ProjectModel | null>(null);
   const [activeTab, setActiveTab] = useState<
     'modules' | 'packages' | 'classes' | 'impact' | 'drift' | 'extraction' | 'cycles' | 'metrics'
-  >('classes');
+  >('modules');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [callHierarchyTarget, setCallHierarchyTarget] = useState<string | null>(null);
   const [depth, setDepth] = useState<number>(1);
@@ -72,6 +72,11 @@ export function App() {
       setSelectedNodeId(null);
       setSelectedModules([]);
       setSelectedPackages([]);
+      if (proj && proj.modules && proj.modules.length > 1) {
+        setActiveTab('modules');
+      } else {
+        setActiveTab('packages');
+      }
     } catch (err: any) {
       console.error('Scan error:', err);
       setScanProgress((prev) => ({
@@ -111,6 +116,11 @@ export function App() {
       setSelectedNodeId(null);
       setSelectedModules([]);
       setSelectedPackages([]);
+      if (proj && proj.modules && proj.modules.length > 1) {
+        setActiveTab('modules');
+      } else {
+        setActiveTab('packages');
+      }
     } catch (err) {
       console.error('Load from NoSQL error:', err);
     } finally {

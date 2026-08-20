@@ -105,12 +105,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const classesByPackageMap = useMemo(() => {
     const map = new Map<string, ClassInfo[]>();
     for (const c of filteredClasses) {
-      let list = map.get(c.package_name);
-      if (!list) {
-        list = [];
-        map.set(c.package_name, list);
+      let listByName = map.get(c.package_name);
+      if (!listByName) {
+        listByName = [];
+        map.set(c.package_name, listByName);
       }
-      list.push(c);
+      listByName.push(c);
+
+      // Also map by short package name for reliable lookups
+      if (c.package_name.includes('.')) {
+        const short = c.package_name.split('.').slice(-2).join('.');
+        let listByShort = map.get(short);
+        if (!listByShort) {
+          listByShort = [];
+          map.set(short, listByShort);
+        }
+        listByShort.push(c);
+      }
     }
     return map;
   }, [filteredClasses]);
@@ -215,7 +226,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
         {showPackageFilter && (
           <div className="px-3 pb-2.5 space-y-1 max-h-36 overflow-y-auto">
-            {visiblePackages.map((p: PackageInfo) => {
+            {visiblePackages.slice(0, 40).map((p: PackageInfo) => {
               const isChecked = selectedPackages.length === 0 || selectedPackages.includes(p.id);
               const shortName = p.name.split('.').slice(-2).join('.');
               return (
@@ -291,7 +302,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           if (hasPackageFilter && !selectedPackages.includes(pkg.id)) return null;
 
           const isExpanded = expandedPkgs[pkg.id] ?? (visiblePackages.length <= 8);
-          const pkgClasses = classesByPackageMap.get(pkg.id) || [];
+          const pkgClasses = classesByPackageMap.get(pkg.name) || classesByPackageMap.get(pkg.id) || [];
           if (searchTerm && pkgClasses.length === 0) return null;
 
           const renderedClasses = searchTerm ? pkgClasses : pkgClasses.slice(0, 30);
