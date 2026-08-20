@@ -33,52 +33,56 @@ export const CustomGraphEdge = memo(({
   const isIndirect = hopDepth !== undefined && hopDepth >= 2;
   const isDirect = hopDepth === 1;
 
-  let strokeColor = isGwtRpc ? '#c084fc' : '#30363d';
-  let strokeWidth = isGwtRpc ? 1.6 : 1.2;
-  let opacity = isGwtRpc ? 0.65 : 0.35;
+  // 1. Base Default Styling (Clean, Lightweight, Subtle Background)
+  let strokeColor = isGwtRpc ? '#a855f7' : '#30363d';
+  let strokeWidth = 1.0;
+  let opacity = 0.22;
   let strokeDasharray: string | undefined = isGwtRpc ? '4,4' : undefined;
 
+  // 2. Active Highlighting when Node is Selected
   if (highlight === 'InboundActive') {
     if (isIndirect) {
-      // Indirect Inbound (Hop >= 2) -> Violet/Indigo dashed line
-      strokeColor = '#a78bfa';
+      strokeColor = '#a78bfa'; // Violet/Indigo dashed
       strokeWidth = 2.0;
       opacity = 0.9;
-      strokeDasharray = '8,5';
+      strokeDasharray = '6,4';
     } else {
-      // Direct Inbound (Hop 1) -> Solid Glowing Bright Cyan
-      strokeColor = isGwtRpc ? '#e879f9' : '#38bdf8';
-      strokeWidth = 3.5;
+      strokeColor = isGwtRpc ? '#e879f9' : '#38bdf8'; // Glowing Bright Cyan
+      strokeWidth = 3.0;
       opacity = 1.0;
       strokeDasharray = isGwtRpc ? '4,4' : undefined;
     }
   } else if (highlight === 'OutboundActive') {
     if (isIndirect) {
-      // Indirect Outbound (Hop >= 2) -> Warm Amber dashed line
-      strokeColor = '#fbbf24';
+      strokeColor = '#fbbf24'; // Warm Amber dashed
       strokeWidth = 2.0;
       opacity = 0.9;
-      strokeDasharray = '8,5';
+      strokeDasharray = '6,4';
     } else {
-      // Direct Outbound (Hop 1) -> Solid Glowing Bright Orange
-      strokeColor = isGwtRpc ? '#d946ef' : '#fb923c';
-      strokeWidth = 3.5;
+      strokeColor = isGwtRpc ? '#d946ef' : '#fb923c'; // Glowing Bright Orange
+      strokeWidth = 3.0;
       opacity = 1.0;
       strokeDasharray = isGwtRpc ? '4,4' : undefined;
     }
-  } else if (highlight === 'CircularActive' || isCircular) {
-    strokeColor = '#ef4444'; // Red
-    strokeWidth = 3.5;
+  } else if (highlight === 'CircularActive') {
+    // Only solid bright red when an active cycle is SELECTED
+    strokeColor = '#ef4444';
+    strokeWidth = 3.0;
     opacity = 1.0;
   } else if (highlight === 'Dimmed') {
     strokeColor = '#21262d';
-    strokeWidth = 0.8;
-    opacity = 0.08;
+    strokeWidth = 0.6;
+    opacity = 0.05;
+  } else if (isCircular) {
+    // Unselected circular edge: subtle muted hint without cluttering the screen
+    strokeColor = 'rgba(239, 68, 68, 0.35)';
+    strokeWidth = 1.2;
+    opacity = 0.35;
   }
 
-  // Show text label on edge when active or for GWT RPC
-  const isHighlighted = highlight === 'InboundActive' || highlight === 'OutboundActive' || highlight === 'CircularActive' || isCircular;
-  const showLabel = isHighlighted || (isGwtRpc && highlight === 'Normal');
+  // Only render label badges for ACTIVE selected edges to maintain 60 FPS
+  const isActive = highlight === 'InboundActive' || highlight === 'OutboundActive' || highlight === 'CircularActive';
+  const showLabel = isActive && (isDirect || isIndirect || (label && label.length > 0));
 
   return (
     <>
@@ -92,40 +96,35 @@ export const CustomGraphEdge = memo(({
           strokeWidth,
           opacity,
           strokeDasharray,
-          transition: 'stroke 0.2s, stroke-width 0.2s, opacity 0.2s',
-          filter:
-            isHighlighted
-              ? `drop-shadow(0 0 ${isIndirect ? '3px' : '7px'} ${strokeColor})`
-              : undefined,
         }}
       />
       {showLabel && (
         <foreignObject
-          width={170}
-          height={26}
-          x={labelX - 85}
-          y={labelY - 13}
+          width={150}
+          height={24}
+          x={labelX - 75}
+          y={labelY - 12}
           className="pointer-events-none"
         >
           <div className="flex items-center justify-center h-full">
             <span
-              className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-full border shadow-2xl truncate max-w-[160px] flex items-center gap-1.5 backdrop-blur-md ${
-                isIndirect
-                  ? 'bg-indigo-950/95 border-indigo-400 text-indigo-200 ring-1 ring-indigo-500/50'
+              className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-full border shadow-lg truncate max-w-[140px] flex items-center gap-1 backdrop-blur-md ${
+                highlight === 'CircularActive'
+                  ? 'bg-rose-950/95 border-rose-500 text-rose-200'
+                  : isIndirect
+                  ? 'bg-indigo-950/95 border-indigo-400 text-indigo-200'
                   : isDirect
-                  ? 'bg-[#0d1117]/95 border-sky-400 text-sky-200 ring-1 ring-sky-400/50'
-                  : isGwtRpc
-                  ? 'bg-fuchsia-950/90 border-fuchsia-500/50 text-fuchsia-200'
+                  ? 'bg-[#0d1117]/95 border-sky-400 text-sky-200'
                   : 'bg-[#161b22]/95 border-[#30363d] text-slate-300'
               }`}
               title={label || `Hop: ${hopDepth}`}
             >
               {isIndirect ? (
-                <span className="text-[8px] px-1.5 py-0.1 rounded-full bg-indigo-500/40 text-indigo-200 font-black">
+                <span className="text-[8px] px-1 py-0.1 rounded bg-indigo-500/40 text-indigo-200 font-bold">
                   Hop {hopDepth}
                 </span>
               ) : isDirect ? (
-                <span className="text-[8px] px-1.5 py-0.1 rounded-full bg-sky-500/30 text-sky-200 font-black">
+                <span className="text-[8px] px-1 py-0.1 rounded bg-sky-500/30 text-sky-200 font-bold">
                   Hop 1
                 </span>
               ) : null}
