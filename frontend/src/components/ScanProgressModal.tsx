@@ -41,12 +41,28 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
     }
   }, [progress?.logs, autoScroll]);
 
-  if (!isOpen) return null;
-
   const logs = progress?.logs || [];
   const percent = Math.min(100, Math.max(0, Math.round(progress?.percentage || 0)));
   const isDone = progress?.is_scanning === false && percent >= 100;
   const hasError = !!progress?.error;
+
+  // Filter logs based on search and category (Always called on every render to satisfy Rules of Hooks)
+  const filteredLogs = useMemo(() => {
+    let list = logs;
+    if (logFilterType === 'errors') {
+      list = list.filter((l) => l.includes('[ERROR]') || l.includes('❌') || l.includes('[WARN]'));
+    } else if (logFilterType === 'stages') {
+      list = list.filter((l) => l.includes('[Етап') || l.includes('🚀') || l.includes('✅'));
+    } else if (logFilterType === 'perf') {
+      list = list.filter((l) => l.includes('файлів/сек') || l.includes('мс') || l.includes('⚡') || l.includes('час:'));
+    }
+
+    if (!logSearch.trim()) return list;
+    const term = logSearch.trim().toLowerCase();
+    return list.filter((l) => l.toLowerCase().includes(term));
+  }, [logs, logFilterType, logSearch]);
+
+  if (!isOpen) return null;
 
   const handleCopyLogs = () => {
     navigator.clipboard.writeText(logs.join('\n'));
@@ -65,22 +81,6 @@ export const ScanProgressModal: React.FC<ScanProgressModalProps> = ({
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   };
-
-  // Filter logs based on search and category
-  const filteredLogs = useMemo(() => {
-    let list = logs;
-    if (logFilterType === 'errors') {
-      list = list.filter((l) => l.includes('[ERROR]') || l.includes('❌') || l.includes('[WARN]'));
-    } else if (logFilterType === 'stages') {
-      list = list.filter((l) => l.includes('[Етап') || l.includes('🚀') || l.includes('✅'));
-    } else if (logFilterType === 'perf') {
-      list = list.filter((l) => l.includes('файлів/сек') || l.includes('мс') || l.includes('⚡') || l.includes('час:'));
-    }
-
-    if (!logSearch.trim()) return list;
-    const term = logSearch.trim().toLowerCase();
-    return list.filter((l) => l.toLowerCase().includes(term));
-  }, [logs, logFilterType, logSearch]);
 
   const stages = [
     { num: 1, name: 'Модулі & Файли', icon: Layers },
