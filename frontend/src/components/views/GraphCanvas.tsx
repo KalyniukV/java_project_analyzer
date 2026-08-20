@@ -89,8 +89,8 @@ function generateNodeSvg(
     <text x="12" y="16.5" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="9.5" font-weight="800" letter-spacing="0.6">${safeTag}</text>
     
     <!-- Top & Bottom Port Handles (ReactFlow Style) -->
-    <circle cx="130" cy="1.5" r="3.5" fill="#38bdf8" stroke="#0d1117" stroke-width="1.5" />
-    <circle cx="130" cy="78.5" r="3.5" fill="#38bdf8" stroke="#0d1117" stroke-width="1.5" />
+    <circle cx="130" cy="1.5" r="3" fill="#38bdf8" stroke="#0d1117" stroke-width="1.5" />
+    <circle cx="130" cy="78.5" r="3" fill="#38bdf8" stroke="#0d1117" stroke-width="1.5" />
     
     <!-- Main Label (Class / Package / Module Name) -->
     <text x="12" y="42" fill="#ffffff" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'JetBrains Mono', sans-serif" font-size="12.5" font-weight="700">${safeLabel}</text>
@@ -253,26 +253,48 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             'opacity': 1,
           } as any,
         },
-        // Inbound caller neighbors (Who calls selected)
+        // Direct Inbound Caller (Step 1)
         {
-          selector: 'node.neighbor-in',
+          selector: 'node.neighbor-in-direct',
           style: {
-            'shadow-blur': 15,
+            'shadow-blur': 18,
             'shadow-color': '#38bdf8',
-            'shadow-opacity': 0.8,
+            'shadow-opacity': 0.85,
             'opacity': 1,
             'z-index': 500,
           },
         },
-        // Outbound callee neighbors (Who selected calls)
+        // Indirect Inbound Caller (Step 2+)
         {
-          selector: 'node.neighbor-out',
+          selector: 'node.neighbor-in-indirect',
           style: {
-            'shadow-blur': 15,
+            'shadow-blur': 12,
+            'shadow-color': '#818cf8',
+            'shadow-opacity': 0.75,
+            'opacity': 0.95,
+            'z-index': 400,
+          },
+        },
+        // Direct Outbound Callee (Step 1)
+        {
+          selector: 'node.neighbor-out-direct',
+          style: {
+            'shadow-blur': 18,
             'shadow-color': '#fbbf24',
-            'shadow-opacity': 0.8,
+            'shadow-opacity': 0.85,
             'opacity': 1,
             'z-index': 500,
+          },
+        },
+        // Indirect Outbound Callee (Step 2+)
+        {
+          selector: 'node.neighbor-out-indirect',
+          style: {
+            'shadow-blur': 12,
+            'shadow-color': '#f97316',
+            'shadow-opacity': 0.75,
+            'opacity': 0.95,
+            'z-index': 400,
           },
         },
         // Dimmed when another node is selected in active mode
@@ -283,17 +305,17 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           },
         },
 
-        // BASE EDGE STYLING (ReactFlow Clean Bezier / Step)
+        // BASE EDGE STYLING (Thin, Crisp, Elegant)
         {
           selector: 'edge',
           style: {
-            'width': 2,
+            'width': 1.2,
             'line-color': '#475569',
             'curve-style': 'bezier',
             'target-arrow-shape': 'triangle',
             'target-arrow-color': '#475569',
-            'arrow-scale': 1.1,
-            'opacity': 0.7,
+            'arrow-scale': 0.8,
+            'opacity': 0.55,
             'transition-property': 'line-color, target-arrow-color, width, opacity',
             'transition-duration': 0.15,
           } as any,
@@ -305,7 +327,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             'line-color': '#38bdf8',
             'target-arrow-color': '#38bdf8',
             'line-style': 'dashed',
-            'width': 2.5,
+            'width': 1.5,
           },
         },
         // Field / Autowired
@@ -314,7 +336,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           style: {
             'line-color': '#ec4899',
             'target-arrow-color': '#ec4899',
-            'width': 2.5,
+            'width': 1.5,
           },
         },
         // Method Call
@@ -323,7 +345,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           style: {
             'line-color': '#a855f7',
             'target-arrow-color': '#a855f7',
-            'width': 2,
+            'width': 1.3,
           },
         },
         // GWT RPC
@@ -332,7 +354,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           style: {
             'line-color': '#fbbf24',
             'target-arrow-color': '#fbbf24',
-            'width': 2.5,
+            'width': 1.5,
           },
         },
         // Circular Edges
@@ -341,32 +363,63 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
           style: {
             'line-color': '#ef4444',
             'target-arrow-color': '#ef4444',
-            'width': 3,
+            'width': 2,
             'opacity': 0.9,
           },
         },
-        // Active Inbound Highlighted Edge (Calls INTO selected)
+
+        // DIRECT (HOP 1) INBOUND HIGHLIGHTED EDGE (Solid, Sky Blue)
         {
-          selector: 'edge.inbound-edge',
+          selector: 'edge.inbound-direct',
           style: {
-            'width': 4,
+            'width': 2.2,
             'opacity': 1,
             'line-color': '#38bdf8',
             'target-arrow-color': '#38bdf8',
+            'arrow-scale': 0.9,
             'z-index': 800,
           },
         },
-        // Active Outbound Highlighted Edge (Calls OUT FROM selected)
+        // INDIRECT (HOP 2+) INBOUND HIGHLIGHTED EDGE (Dashed, Indigo)
         {
-          selector: 'edge.outbound-edge',
+          selector: 'edge.inbound-indirect',
           style: {
-            'width': 4,
+            'width': 1.6,
+            'opacity': 0.85,
+            'line-color': '#818cf8',
+            'target-arrow-color': '#818cf8',
+            'line-style': 'dashed',
+            'arrow-scale': 0.8,
+            'z-index': 700,
+          },
+        },
+
+        // DIRECT (HOP 1) OUTBOUND HIGHLIGHTED EDGE (Solid, Amber)
+        {
+          selector: 'edge.outbound-direct',
+          style: {
+            'width': 2.2,
             'opacity': 1,
             'line-color': '#fbbf24',
             'target-arrow-color': '#fbbf24',
+            'arrow-scale': 0.9,
             'z-index': 800,
           },
         },
+        // INDIRECT (HOP 2+) OUTBOUND HIGHLIGHTED EDGE (Dashed, Orange)
+        {
+          selector: 'edge.outbound-indirect',
+          style: {
+            'width': 1.6,
+            'opacity': 0.85,
+            'line-color': '#f97316',
+            'target-arrow-color': '#f97316',
+            'line-style': 'dashed',
+            'arrow-scale': 0.8,
+            'z-index': 700,
+          },
+        },
+
         // Dimmed Edge
         {
           selector: 'edge.dimmed',
@@ -573,14 +626,16 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   }, []);
 
   // -------------------------------------------------------------
-  // 3. Focus, Multi-hop Depth BFS, and Isolate Mode
+  // 3. Multi-Hop Depth BFS, Layered Edge Styling & Isolate Mode
   // -------------------------------------------------------------
   useEffect(() => {
     const cy = cyRef.current;
     if (!cy) return;
 
     cy.batch(() => {
-      cy.elements().removeClass('selected inbound-edge outbound-edge neighbor-in neighbor-out dimmed');
+      cy.elements().removeClass(
+        'selected inbound-direct inbound-indirect outbound-direct outbound-indirect neighbor-in-direct neighbor-in-indirect neighbor-out-direct neighbor-out-indirect dimmed'
+      );
       cy.elements().style('display', 'element');
 
       if (selectedNodeId) {
@@ -588,59 +643,90 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         if (selectedNode.length > 0) {
           selectedNode.addClass('selected');
 
-          // Multi-hop BFS according to depth prop
-          let inNodes = cy.collection();
-          let inEdges = cy.collection();
-          let currInFrontier = selectedNode;
+          // Direct (Hop 1) Inbound
+          const directInEdges = selectedNode.incomers('edge');
+          const directInNodes = selectedNode.incomers('node');
 
-          for (let d = 0; d < depth; d++) {
+          let allInNodes = selectedNode.incomers('node');
+          let allInEdges = selectedNode.incomers('edge');
+          let currInFrontier = directInNodes;
+
+          // Indirect (Hop 2..N) Inbound BFS
+          for (let d = 1; d < depth; d++) {
             const stepEdges = currInFrontier.incomers('edge');
-            const stepNodes = currInFrontier.incomers('node').difference(inNodes).difference(selectedNode);
-            inEdges = inEdges.union(stepEdges);
-            inNodes = inNodes.union(stepNodes);
+            const stepNodes = currInFrontier.incomers('node').difference(allInNodes).difference(selectedNode);
+            allInEdges = allInEdges.union(stepEdges);
+            allInNodes = allInNodes.union(stepNodes);
             currInFrontier = stepNodes;
             if (currInFrontier.length === 0) break;
           }
 
-          let outNodes = cy.collection();
-          let outEdges = cy.collection();
-          let currOutFrontier = selectedNode;
+          const indirectInNodes = allInNodes.difference(directInNodes);
+          const indirectInEdges = allInEdges.difference(directInEdges);
 
-          for (let d = 0; d < depth; d++) {
+          // Direct (Hop 1) Outbound
+          const directOutEdges = selectedNode.outgoers('edge');
+          const directOutNodes = selectedNode.outgoers('node');
+
+          let allOutNodes = selectedNode.outgoers('node');
+          let allOutEdges = selectedNode.outgoers('edge');
+          let currOutFrontier = directOutNodes;
+
+          // Indirect (Hop 2..N) Outbound BFS
+          for (let d = 1; d < depth; d++) {
             const stepEdges = currOutFrontier.outgoers('edge');
-            const stepNodes = currOutFrontier.outgoers('node').difference(outNodes).difference(selectedNode);
-            outEdges = outEdges.union(stepEdges);
-            outNodes = outNodes.union(stepNodes);
+            const stepNodes = currOutFrontier.outgoers('node').difference(allOutNodes).difference(selectedNode);
+            allOutEdges = allOutEdges.union(stepEdges);
+            allOutNodes = allOutNodes.union(stepNodes);
             currOutFrontier = stepNodes;
             if (currOutFrontier.length === 0) break;
           }
 
-          const activeNodes = selectedNode.union(inNodes).union(outNodes);
-          const activeEdges = inEdges.union(outEdges);
+          const indirectOutNodes = allOutNodes.difference(directOutNodes);
+          const indirectOutEdges = allOutEdges.difference(directOutEdges);
+
+          const activeNodes = selectedNode.union(allInNodes).union(allOutNodes);
+          const activeEdges = allInEdges.union(allOutEdges);
           const activeElements = activeNodes.union(activeEdges);
 
           if (isolateMode) {
-            // In isolate mode, completely hide everything outside the neighborhood
+            // In isolate mode, completely hide elements outside the multi-hop neighborhood
             const nonActiveElements = cy.elements().difference(activeElements);
             nonActiveElements.style('display', 'none');
 
-            inNodes.addClass('neighbor-in');
-            outNodes.addClass('neighbor-out');
-            inEdges.addClass('inbound-edge');
-            outEdges.addClass('outbound-edge');
+            // Apply direct vs indirect styling
+            directInNodes.addClass('neighbor-in-direct');
+            indirectInNodes.addClass('neighbor-in-indirect');
+            directInEdges.addClass('inbound-direct');
+            indirectInEdges.addClass('inbound-indirect');
+
+            directOutNodes.addClass('neighbor-out-direct');
+            indirectOutNodes.addClass('neighbor-out-indirect');
+            directOutEdges.addClass('outbound-direct');
+            indirectOutEdges.addClass('outbound-indirect');
           } else if (onlyActiveEdges) {
             cy.elements().addClass('dimmed');
             selectedNode.removeClass('dimmed');
 
-            inNodes.removeClass('dimmed').addClass('neighbor-in');
-            outNodes.removeClass('dimmed').addClass('neighbor-out');
-            inEdges.removeClass('dimmed').addClass('inbound-edge');
-            outEdges.removeClass('dimmed').addClass('outbound-edge');
+            directInNodes.removeClass('dimmed').addClass('neighbor-in-direct');
+            indirectInNodes.removeClass('dimmed').addClass('neighbor-in-indirect');
+            directInEdges.removeClass('dimmed').addClass('inbound-direct');
+            indirectInEdges.removeClass('dimmed').addClass('inbound-indirect');
+
+            directOutNodes.removeClass('dimmed').addClass('neighbor-out-direct');
+            indirectOutNodes.removeClass('dimmed').addClass('neighbor-out-indirect');
+            directOutEdges.removeClass('dimmed').addClass('outbound-direct');
+            indirectOutEdges.removeClass('dimmed').addClass('outbound-indirect');
           } else {
-            inNodes.addClass('neighbor-in');
-            outNodes.addClass('neighbor-out');
-            inEdges.addClass('inbound-edge');
-            outEdges.addClass('outbound-edge');
+            directInNodes.addClass('neighbor-in-direct');
+            indirectInNodes.addClass('neighbor-in-indirect');
+            directInEdges.addClass('inbound-direct');
+            indirectInEdges.addClass('inbound-indirect');
+
+            directOutNodes.addClass('neighbor-out-direct');
+            indirectOutNodes.addClass('neighbor-out-indirect');
+            directOutEdges.addClass('outbound-direct');
+            indirectOutEdges.addClass('outbound-indirect');
           }
         }
       }
@@ -861,12 +947,12 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       <div className="absolute bottom-4 right-4 z-20 pointer-events-none flex items-center gap-2">
         <div className="px-3 py-1.5 rounded-xl bg-[#161b22]/95 border border-[#30363d] text-[11px] font-mono shadow-2xl backdrop-blur-md flex items-center gap-3">
           <span className="flex items-center gap-1.5 text-sky-300 font-bold">
-            <span className="w-2.5 h-2.5 rounded-full bg-sky-400"></span>
-            <span>⬅ Вхідні</span>
+            <span className="w-2 h-2 rounded-full bg-sky-400"></span>
+            <span>Прямі 1-й крок</span>
           </span>
-          <span className="flex items-center gap-1.5 text-amber-300 font-bold">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-            <span>➡ Вихідні</span>
+          <span className="flex items-center gap-1.5 text-indigo-300 font-medium">
+            <span className="w-2.5 h-0.5 bg-indigo-400"></span>
+            <span>Непрямі 2+ крок</span>
           </span>
           <span className="text-emerald-400 font-bold">⚡ 60 FPS (Canvas)</span>
         </div>

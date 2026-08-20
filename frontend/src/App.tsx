@@ -176,8 +176,8 @@ export function App() {
       getGraph(
         activeTab,
         undefined,
-        depth,
-        isolateMode,
+        1,
+        false,
         selectedModules.length > 0 ? selectedModules : undefined,
         selectedPackages.length > 0 ? selectedPackages : undefined,
         includeExternal
@@ -195,7 +195,7 @@ export function App() {
     return () => {
       isMounted = false;
     };
-  }, [activeTab, depth, isolateMode, selectedModules, selectedPackages, includeExternal]);
+  }, [activeTab, selectedModules, selectedPackages, includeExternal]);
 
   // Handle node selection from graph or sidebar
   const handleSelectNode = (nodeId: string) => {
