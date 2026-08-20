@@ -107,8 +107,7 @@
 }
 
 .light .text-slate-100,
-.light .text-slate-200,
-.light .text-white {
+.light .text-slate-200 {
   color: #1f2328 !important;
 }
 
