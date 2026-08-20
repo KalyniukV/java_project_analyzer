@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { ProjectModel, ClassInfo, PackageInfo, ModuleInfo } from '../types';
 import {
   Folder,
@@ -14,8 +14,7 @@ import {
   Target,
   Sparkles,
   Globe,
-  CheckSquare,
-  Square
+  X
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -61,8 +60,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onToggleIncludeExternal,
   onDrillDown,
 }) => {
+  // Local input with debounce for 0ms typing lag
+  const [localInput, setLocalInput] = useState(searchTerm);
   const [expandedMods, setExpandedMods] = useState<Record<string, boolean>>({});
   const [expandedPkgs, setExpandedPkgs] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    setLocalInput(searchTerm);
+  }, [searchTerm]);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      onSearchChange(localInput);
+    }, 120);
+    return () => clearTimeout(handler);
+  }, [localInput, onSearchChange]);
 
   const toggleMod = (modId: string) => {
     setExpandedMods((prev) => ({ ...prev, [modId]: !prev[modId] }));
@@ -74,38 +86,57 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const hasModuleFilter = selectedModules.length > 0;
   const hasPackageFilter = selectedPackages.length > 0;
+  const isSearching = localInput.trim().length > 0;
 
-  // Filter classes by active module & package filters & search with useMemo
-  const filteredClasses = useMemo(() => {
-    if (!project) return [];
-    const term = searchTerm.trim().toLowerCase();
-    return project.classes.filter((c: ClassInfo) => {
-      if (hideDTOs && (c.name.endsWith('Dto') || c.name.endsWith('DTO') || c.name.endsWith('VO'))) return false;
-      if (hasModuleFilter && !selectedModules.includes(c.module_name)) return false;
-      if (hasPackageFilter && !selectedPackages.includes(c.package_name)) return false;
-      if (!term) return true;
-      return (
-        c.name.toLowerCase().includes(term) ||
-        c.package_name.toLowerCase().includes(term)
-      );
-    });
-  }, [project, hideDTOs, hasModuleFilter, selectedModules, hasPackageFilter, selectedPackages, searchTerm]);
+  // 1. Filtered classes (Lightning fast O(N), with search term)
+  const { matchedClasses, totalMatchedCount } = useMemo(() => {
+    if (!project) return { matchedClasses: [], totalMatchedCount: 0 };
+    const term = localInput.trim().toLowerCase();
 
-  // Pre-index classes by module and package for O(1) hierarchy building
-  const { classesByPkgMap, packagesByModMap } = useMemo(() => {
-    const pkgMap = new Map<string, ClassInfo[]>();
-    for (const c of filteredClasses) {
-      let list = pkgMap.get(c.package_name);
-      if (!list) {
-        list = [];
-        pkgMap.set(c.package_name, list);
+    let count = 0;
+    const matches: ClassInfo[] = [];
+
+    for (const c of project.classes) {
+      if (hideDTOs && (c.name.endsWith('Dto') || c.name.endsWith('DTO') || c.name.endsWith('VO'))) continue;
+      if (hasModuleFilter && !selectedModules.includes(c.module_name)) continue;
+      if (hasPackageFilter && !selectedPackages.includes(c.package_name)) continue;
+
+      if (!term || c.name.toLowerCase().includes(term) || c.package_name.toLowerCase().includes(term) || c.module_name.toLowerCase().includes(term)) {
+        count++;
+        if (matches.length < 50) {
+          matches.push(c);
+        }
       }
-      list.push(c);
     }
 
+    return { matchedClasses: matches, totalMatchedCount: count };
+  }, [project, hideDTOs, hasModuleFilter, selectedModules, hasPackageFilter, selectedPackages, localInput]);
+
+  // 2. Group matched classes by Module -> Package
+  const searchGroupedTree = useMemo(() => {
+    if (!isSearching) return null;
+
+    const modMap = new Map<string, Map<string, ClassInfo[]>>();
+    for (const c of matchedClasses) {
+      const mName = c.module_name || 'default';
+      if (!modMap.has(mName)) {
+        modMap.set(mName, new Map());
+      }
+      const pkgMap = modMap.get(mName)!;
+      if (!pkgMap.has(c.package_name)) {
+        pkgMap.set(c.package_name, []);
+      }
+      pkgMap.get(c.package_name)!.push(c);
+    }
+    return modMap;
+  }, [matchedClasses, isSearching]);
+
+  // 3. Normal structure (when NOT searching)
+  const { packagesByModMap } = useMemo(() => {
     const modMap = new Map<string, PackageInfo[]>();
     if (project) {
       for (const p of project.packages) {
+        if (hasModuleFilter && !selectedModules.includes(p.module_name)) continue;
         const modKey = p.module_name || 'default';
         let list = modMap.get(modKey);
         if (!list) {
@@ -115,29 +146,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
         list.push(p);
       }
     }
-
-    return { classesByPkgMap: pkgMap, packagesByModMap: modMap };
-  }, [filteredClasses, project]);
+    return { packagesByModMap: modMap };
+  }, [project, hasModuleFilter, selectedModules]);
 
   if (!project) return null;
 
   const modulesList = project.modules.length > 0
-    ? project.modules
+    ? (hasModuleFilter ? project.modules.filter(m => selectedModules.includes(m.id)) : project.modules)
     : [{ id: 'default', name: project.project_name, path: '', build_type: '', direct_dependencies: [], exported_packages: [], afferent_coupling: 0, efferent_coupling: 0, instability: 0 }];
 
   return (
     <div className="w-80 h-full flex flex-col bg-[#161b22] border-r border-[#30363d] overflow-hidden flex-shrink-0 select-none">
-      {/* Search Input */}
-      <div className="p-3 border-b border-[#30363d] bg-black/15">
+      {/* Search Input with Instant Clear */}
+      <div className="p-3 border-b border-[#30363d] bg-black/20">
         <div className="relative">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Пошук модулів, пакетів, класів..."
-            value={searchTerm}
-            onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition-colors font-mono"
+            placeholder="Швидкий пошук (клас, пакет, модуль)..."
+            value={localInput}
+            onChange={(e) => setLocalInput(e.target.value)}
+            className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl pl-8 pr-7 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition-colors font-mono"
           />
+          {localInput && (
+            <button
+              onClick={() => { setLocalInput(''); onSearchChange(''); }}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-200"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -188,157 +226,223 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </label>
       </div>
 
-      {/* 3-Level Hierarchical Tree: Module ➔ Package ➔ Class */}
+      {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 px-2 py-1 flex items-center justify-between">
-          <span className="flex items-center gap-1">
-            <Layers className="w-3 h-3 text-emerald-400" /> Ієрархія ({modulesList.length} мод. • {filteredClasses.length} клас.)
-          </span>
-        </div>
+        {isSearching ? (
+          /* =========================================================
+             SEARCH RESULTS MODE (Grouped by Module ➔ Package ➔ Class)
+             ========================================================= */
+          <div className="space-y-2">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 px-2 py-1 flex items-center justify-between">
+              <span className="flex items-center gap-1 text-sky-300 font-bold">
+                <Search className="w-3 h-3 text-sky-400" />
+                Знайдено: {totalMatchedCount} {totalMatchedCount === 1 ? 'клас' : 'класів'}
+              </span>
+              {totalMatchedCount > 50 && (
+                <span className="text-[9px] text-amber-400 font-mono">
+                  Топ-50
+                </span>
+              )}
+            </div>
 
-        {modulesList.map((m) => {
-          const isModExpanded = expandedMods[m.id] ?? (modulesList.length <= 3 || searchTerm.length > 0);
-          const modPackages = packagesByModMap.get(m.id) || [];
-          const isModSelected = selectedModules.includes(m.id);
-
-          return (
-            <div key={m.id} className="space-y-0.5">
-              {/* Level 1: Module Header */}
-              <div
-                className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-mono transition-colors group ${
-                  isModSelected
-                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                    : selectedNodeId === m.id
-                    ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
-                    : 'text-slate-200 hover:bg-white/5'
-                }`}
-              >
-                <button onClick={() => toggleMod(m.id)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
-                  {isModExpanded ? (
-                    <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                  ) : (
-                    <ChevronRight className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                  )}
-                  <Box className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                  <span className="truncate flex-1 font-bold text-[11px]" title={m.name}>
-                    {m.name}
+            {searchGroupedTree && Array.from(searchGroupedTree.entries()).map(([modName, pkgMap]) => (
+              <div key={modName} className="rounded-xl border border-emerald-500/20 bg-black/20 p-2 space-y-1.5">
+                {/* Module Group Header */}
+                <div className="flex items-center justify-between text-xs font-mono font-bold text-emerald-300 px-1">
+                  <span className="flex items-center gap-1.5 truncate">
+                    <Box className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                    <span className="truncate">{modName}</span>
                   </span>
-                </button>
-
-                <div className="flex items-center gap-1">
                   <button
                     onClick={() => {
-                      onSelectOnlyModule(m.id);
-                      if (onDrillDown) onDrillDown(m.id, 'packages');
+                      onSelectOnlyModule(modName);
+                      if (onDrillDown) onDrillDown(modName, 'packages');
                     }}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-emerald-500/20 rounded text-emerald-400 transition-opacity text-[10px] font-semibold"
-                    title="Фокусувати цей модуль на графі"
+                    className="p-1 hover:bg-emerald-500/20 rounded text-emerald-400 transition"
+                    title="Фокус на цьому модулі"
                   >
                     <Target className="w-3 h-3" />
                   </button>
-                  <span className="text-[9px] text-slate-400 px-1 rounded bg-black/40">
-                    {modPackages.length} пак.
-                  </span>
+                </div>
+
+                {/* Packages in this Module */}
+                <div className="space-y-1 pl-2 border-l border-emerald-500/10 ml-1">
+                  {Array.from(pkgMap.entries()).map(([pkgName, classes]) => (
+                    <div key={pkgName} className="space-y-0.5">
+                      <div className="flex items-center justify-between text-[11px] font-mono text-purple-300 px-1">
+                        <span className="flex items-center gap-1 truncate" title={pkgName}>
+                          <Folder className="w-3 h-3 text-purple-400 flex-shrink-0" />
+                          <span className="truncate">{pkgName.split('.').slice(-2).join('.')}</span>
+                        </span>
+                        <button
+                          onClick={() => {
+                            onSelectOnlyPackage(pkgName);
+                            if (onDrillDown) onDrillDown(pkgName, 'classes');
+                          }}
+                          className="p-0.5 hover:bg-purple-500/20 rounded text-purple-400 transition"
+                          title="Фокус на цьому пакеті"
+                        >
+                          <Target className="w-2.5 h-2.5" />
+                        </button>
+                      </div>
+
+                      {/* Matching Classes */}
+                      <div className="space-y-0.5 pl-3 border-l border-purple-500/10 ml-1">
+                        {classes.map((cls) => {
+                          const isSelected = selectedNodeId === cls.id;
+                          return (
+                            <button
+                              key={cls.id}
+                              onClick={() => onSelectNode(cls.id)}
+                              className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-mono transition-all text-left truncate ${
+                                isSelected
+                                  ? 'bg-sky-500/30 text-sky-200 border border-sky-500/60 font-bold shadow-md'
+                                  : 'text-slate-300 hover:bg-white/5 hover:text-white'
+                              }`}
+                              title={cls.id}
+                            >
+                              <FileCode className={`w-3 h-3 flex-shrink-0 ${isSelected ? 'text-sky-400' : 'text-slate-400'}`} />
+                              <span className="truncate">{cls.name}</span>
+                              {cls.annotations.length > 0 && (
+                                <span className="text-[8px] text-amber-400 ml-auto flex-shrink-0">
+                                  @{cls.annotations[0]}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
+            ))}
 
-              {/* Level 2: Packages of this Module */}
-              {isModExpanded && (
-                <div className="pl-3 space-y-0.5 border-l border-emerald-500/10 ml-3.5">
-                  {modPackages.map((pkg) => {
-                    const isPkgExpanded = expandedPkgs[pkg.id] ?? (modPackages.length <= 4 || searchTerm.length > 0);
-                    const pkgClasses = classesByPkgMap.get(pkg.name) || classesByPkgMap.get(pkg.id) || [];
-                    if (searchTerm && pkgClasses.length === 0) return null;
-
-                    const isPkgSelected = selectedPackages.includes(pkg.id);
-                    const shortPkgName = pkg.name.split('.').slice(-2).join('.');
-
-                    return (
-                      <div key={pkg.id} className="space-y-0.5">
-                        {/* Package Header */}
-                        <div
-                          className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-mono transition-colors group ${
-                            isPkgSelected
-                              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
-                              : selectedNodeId === pkg.id
-                              ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
-                              : 'text-slate-300 hover:bg-white/5'
-                          }`}
-                        >
-                          <button onClick={() => togglePkg(pkg.id)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
-                            {isPkgExpanded ? (
-                              <ChevronDown className="w-3 h-3 text-slate-400 flex-shrink-0" />
-                            ) : (
-                              <ChevronRight className="w-3 h-3 text-slate-400 flex-shrink-0" />
-                            )}
-                            {isPkgExpanded ? (
-                              <FolderOpen className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                            ) : (
-                              <Folder className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                            )}
-                            <span className="truncate flex-1 text-[11px]" title={pkg.name}>
-                              {shortPkgName}
-                            </span>
-                          </button>
-
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => {
-                                onSelectOnlyPackage(pkg.id);
-                                if (onDrillDown) onDrillDown(pkg.id, 'classes');
-                              }}
-                              className="opacity-0 group-hover:opacity-100 p-1 hover:bg-purple-500/20 rounded text-purple-400 transition-opacity"
-                              title="Ізолювати класи цього пакета на графі"
-                            >
-                              <Target className="w-3 h-3" />
-                            </button>
-                            <span className="text-[9px] text-slate-400 px-1 rounded bg-black/40">
-                              {pkgClasses.length}
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Level 3: Classes in Package */}
-                        {isPkgExpanded && (
-                          <div className="pl-3 space-y-0.5 border-l border-purple-500/10 ml-3">
-                            {pkgClasses.slice(0, 30).map((cls) => {
-                              const isClassSelected = selectedNodeId === cls.id;
-                              return (
-                                <button
-                                  key={cls.id}
-                                  onClick={() => onSelectNode(cls.id)}
-                                  className={`w-full flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono transition-all text-left truncate ${
-                                    isClassSelected
-                                      ? 'bg-sky-500/25 text-sky-300 border border-sky-500/50 font-bold shadow-sm'
-                                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-                                  }`}
-                                  title={cls.id}
-                                >
-                                  <FileCode className={`w-3 h-3 flex-shrink-0 ${isClassSelected ? 'text-sky-400' : 'text-slate-500'}`} />
-                                  <span className="truncate">{cls.name}</span>
-                                  {cls.annotations.length > 0 && (
-                                    <span className="text-[8px] text-amber-400 ml-auto flex-shrink-0 font-normal">
-                                      @{cls.annotations[0]}
-                                    </span>
-                                  )}
-                                </button>
-                              );
-                            })}
-                            {pkgClasses.length > 30 && (
-                              <div className="text-[9px] font-mono text-slate-500 px-2 py-0.5 italic">
-                                +ще {pkgClasses.length - 30} класів
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+            {totalMatchedCount === 0 && (
+              <div className="p-6 text-center text-xs font-mono text-slate-500 border border-dashed border-[#30363d] rounded-xl">
+                Не знайдено класів за запитом "{localInput}".
+              </div>
+            )}
+          </div>
+        ) : (
+          /* =========================================================
+             STANDARD HIERARCHICAL TREE (Module ➔ Package ➔ Class)
+             ========================================================= */
+          <div className="space-y-1">
+            <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 px-2 py-1 flex items-center justify-between">
+              <span className="flex items-center gap-1">
+                <Layers className="w-3 h-3 text-emerald-400" />
+                Ієрархія ({modulesList.length} мод. • {project.packages.length} пак.)
+              </span>
             </div>
-          );
-        })}
+
+            {modulesList.map((m) => {
+              const isModExpanded = expandedMods[m.id] ?? (modulesList.length <= 2);
+              const modPackages = packagesByModMap.get(m.id) || [];
+              const isModSelected = selectedModules.includes(m.id);
+
+              return (
+                <div key={m.id} className="space-y-0.5">
+                  {/* Module Header */}
+                  <div
+                    className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-mono transition-colors group ${
+                      isModSelected
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        : selectedNodeId === m.id
+                        ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+                        : 'text-slate-200 hover:bg-white/5'
+                    }`}
+                  >
+                    <button onClick={() => toggleMod(m.id)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
+                      {isModExpanded ? (
+                        <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                      )}
+                      <Box className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                      <span className="truncate flex-1 font-bold text-[11px]" title={m.name}>
+                        {m.name}
+                      </span>
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          onSelectOnlyModule(m.id);
+                          if (onDrillDown) onDrillDown(m.id, 'packages');
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-emerald-500/20 rounded text-emerald-400 transition-opacity"
+                        title="Фокусувати цей модуль на графі"
+                      >
+                        <Target className="w-3 h-3" />
+                      </button>
+                      <span className="text-[9px] text-slate-400 px-1 rounded bg-black/40">
+                        {modPackages.length}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Packages in Module */}
+                  {isModExpanded && (
+                    <div className="pl-3 space-y-0.5 border-l border-emerald-500/10 ml-3.5">
+                      {modPackages.map((pkg) => {
+                        const isPkgExpanded = expandedPkgs[pkg.id] ?? false;
+                        const isPkgSelected = selectedPackages.includes(pkg.id);
+                        const shortPkgName = pkg.name.split('.').slice(-2).join('.');
+
+                        return (
+                          <div key={pkg.id} className="space-y-0.5">
+                            <div
+                              className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-mono transition-colors group ${
+                                isPkgSelected
+                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                                  : selectedNodeId === pkg.id
+                                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+                                  : 'text-slate-300 hover:bg-white/5'
+                              }`}
+                            >
+                              <button onClick={() => togglePkg(pkg.id)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
+                                {isPkgExpanded ? (
+                                  <ChevronDown className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                                ) : (
+                                  <ChevronRight className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                                )}
+                                {isPkgExpanded ? (
+                                  <FolderOpen className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                                ) : (
+                                  <Folder className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                                )}
+                                <span className="truncate flex-1 text-[11px]" title={pkg.name}>
+                                  {shortPkgName}
+                                </span>
+                              </button>
+
+                              <div className="flex items-center gap-1">
+                                <button
+                                  onClick={() => {
+                                    onSelectOnlyPackage(pkg.id);
+                                    if (onDrillDown) onDrillDown(pkg.id, 'classes');
+                                  }}
+                                  className="opacity-0 group-hover:opacity-100 p-1 hover:bg-purple-500/20 rounded text-purple-400 transition-opacity"
+                                  title="Ізолювати класи цього пакета на графі"
+                                >
+                                  <Target className="w-3 h-3" />
+                                </button>
+                                <span className="text-[9px] text-slate-400 px-1 rounded bg-black/40">
+                                  {pkg.class_ids.length}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
