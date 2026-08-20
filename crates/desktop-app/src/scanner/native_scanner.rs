@@ -48,6 +48,7 @@ pub struct NativeJavaScanner {
     field_regex: Regex,
     method_regex: Regex,
     annotation_regex: Regex,
+    #[allow(dead_code)]
     pom_module_regex: Regex,
     gradle_include_regex: Regex,
     gwt_entry_point_regex: Regex,
@@ -303,9 +304,10 @@ impl NativeJavaScanner {
                                 .push(class_info.id.clone());
                         }
 
-                        // Track package
+                        // Track package per module
+                        let pkg_key = format!("{}::{}", class_info.module_name, class_info.package_name);
                         let pkg_entry = package_map
-                            .entry(class_info.package_name.clone())
+                            .entry(pkg_key)
                             .or_insert_with(|| PackageInfo {
                                 id: class_info.package_name.clone(),
                                 name: class_info.package_name.clone(),
@@ -672,34 +674,85 @@ impl NativeJavaScanner {
     }
 
     fn detect_modules(&self, root_dir: &Path, model: &mut ProjectModel) -> Result<()> {
-        let pom_path = root_dir.join("pom.xml");
-        let gradle_settings = root_dir.join("settings.gradle");
-        let gradle_kts = root_dir.join("settings.gradle.kts");
-
         let mut found_modules = Vec::new();
+        let mut discovered_paths = HashSet::new();
 
-        if pom_path.exists() {
-            if let Ok(content) = fs::read_to_string(&pom_path) {
-                for cap in self.pom_module_regex.captures_iter(&content) {
-                    if let Some(m) = cap.get(1) {
-                        let mod_name = m.as_str().trim();
-                        let mod_path = root_dir.join(mod_name);
-                        found_modules.push(ModuleInfo {
-                            id: mod_name.to_string(),
-                            name: mod_name.to_string(),
-                            path: mod_path.to_string_lossy().to_string(),
-                            build_type: "maven".to_string(),
-                            direct_dependencies: Vec::new(),
-                            exported_packages: Vec::new(),
-                            afferent_coupling: 0,
-                            efferent_coupling: 0,
-                            instability: 0.0,
-                        });
+        let artifact_id_regex = Regex::new(r"<artifactId>([^<]+)</artifactId>").unwrap();
+
+        // 1. Walk entire project tree to discover all pom.xml, build.gradle, and build.gradle.kts
+        for entry in WalkDir::new(root_dir)
+            .into_iter()
+            .filter_entry(|e| {
+                let name = e.file_name().to_str().unwrap_or("");
+                !(e.file_type().is_dir()
+                    && (name.starts_with('.')
+                        || name == "target"
+                        || name == "build"
+                        || name == "node_modules"
+                        || name == "bin"
+                        || name == "out"
+                        || name == "dist"
+                        || name == ".tools"
+                        || name == ".javalens"))
+            })
+            .filter_map(|e| e.ok())
+        {
+            let file_name = entry.file_name().to_str().unwrap_or("");
+            let is_pom = file_name == "pom.xml";
+            let is_gradle = file_name == "build.gradle" || file_name == "build.gradle.kts";
+
+            if is_pom || is_gradle {
+                let dir_path = entry.path().parent().unwrap_or(root_dir);
+                let dir_path_str = dir_path.to_string_lossy().to_string();
+
+                if discovered_paths.insert(dir_path_str.clone()) {
+                    let mut mod_name = dir_path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("module")
+                        .to_string();
+
+                    // If it's a pom.xml, extract artifactId if available
+                    if is_pom {
+                        if let Ok(content) = fs::read_to_string(entry.path()) {
+                            // First artifactId or submodule name
+                            if let Some(cap) = artifact_id_regex.captures(&content) {
+                                if let Some(a_id) = cap.get(1) {
+                                    let parsed_name = a_id.as_str().trim();
+                                    if !parsed_name.is_empty() {
+                                        mod_name = parsed_name.to_string();
+                                    }
+                                }
+                            }
+                        }
                     }
+
+                    // Check if module is the root directory
+                    let is_root = dir_path == root_dir;
+                    let display_id = if is_root {
+                        root_dir.file_name().and_then(|n| n.to_str()).unwrap_or("root").to_string()
+                    } else {
+                        mod_name.clone()
+                    };
+
+                    found_modules.push(ModuleInfo {
+                        id: display_id.clone(),
+                        name: display_id,
+                        path: dir_path_str,
+                        build_type: if is_pom { "maven".to_string() } else { "gradle".to_string() },
+                        direct_dependencies: Vec::new(),
+                        exported_packages: Vec::new(),
+                        afferent_coupling: 0,
+                        efferent_coupling: 0,
+                        instability: 0.0,
+                    });
                 }
             }
         }
 
+        // 2. Also parse Gradle settings.gradle if present
+        let gradle_settings = root_dir.join("settings.gradle");
+        let gradle_kts = root_dir.join("settings.gradle.kts");
         let gradle_path = if gradle_settings.exists() {
             Some(gradle_settings)
         } else if gradle_kts.exists() {
@@ -715,24 +768,40 @@ impl NativeJavaScanner {
                         let raw_name = m.as_str().trim().trim_start_matches(':');
                         let mod_name = raw_name.replace(':', "/");
                         let mod_path = root_dir.join(&mod_name);
-                        found_modules.push(ModuleInfo {
-                            id: raw_name.to_string(),
-                            name: raw_name.to_string(),
-                            path: mod_path.to_string_lossy().to_string(),
-                            build_type: "gradle".to_string(),
-                            direct_dependencies: Vec::new(),
-                            exported_packages: Vec::new(),
-                            afferent_coupling: 0,
-                            efferent_coupling: 0,
-                            instability: 0.0,
-                        });
+                        let mod_path_str = mod_path.to_string_lossy().to_string();
+
+                        if discovered_paths.insert(mod_path_str.clone()) {
+                            found_modules.push(ModuleInfo {
+                                id: raw_name.to_string(),
+                                name: raw_name.to_string(),
+                                path: mod_path_str,
+                                build_type: "gradle".to_string(),
+                                direct_dependencies: Vec::new(),
+                                exported_packages: Vec::new(),
+                                afferent_coupling: 0,
+                                efferent_coupling: 0,
+                                instability: 0.0,
+                            });
+                        }
                     }
                 }
             }
         }
 
+        // If submodules exist and root also exists, remove root if root contains no direct java files of its own
+        if found_modules.len() > 1 {
+            found_modules.retain(|m| {
+                if m.path == root_dir.to_string_lossy() {
+                    // Check if root directly has src/main/java
+                    let root_src = root_dir.join("src").join("main").join("java");
+                    root_src.exists()
+                } else {
+                    true
+                }
+            });
+        }
+
         if found_modules.is_empty() {
-            // Single module project
             let root_name = root_dir
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -742,7 +811,7 @@ impl NativeJavaScanner {
                 id: root_name.clone(),
                 name: root_name,
                 path: root_dir.to_string_lossy().to_string(),
-                build_type: if pom_path.exists() { "maven" } else { "standard" }.to_string(),
+                build_type: "standard".to_string(),
                 direct_dependencies: Vec::new(),
                 exported_packages: Vec::new(),
                 afferent_coupling: 0,
@@ -750,6 +819,9 @@ impl NativeJavaScanner {
                 instability: 0.0,
             });
         }
+
+        // Sort modules by path length descending so most specific nested submodules match first
+        found_modules.sort_by(|a, b| b.path.len().cmp(&a.path.len()));
 
         model.modules = found_modules;
         Ok(())
@@ -929,11 +1001,10 @@ impl NativeJavaScanner {
         // Determine module
         let mut module_name = "".to_string();
         for m in modules {
-            if let Ok(rel) = file_path.strip_prefix(Path::new(&m.path)) {
-                if !rel.as_os_str().is_empty() {
-                    module_name = m.name.clone();
-                    break;
-                }
+            let mod_path = Path::new(&m.path);
+            if file_path.starts_with(mod_path) {
+                module_name = m.name.clone();
+                break;
             }
         }
         if module_name.is_empty() && !modules.is_empty() {
