@@ -10,12 +10,12 @@ import {
   Layers,
   Search,
   Filter,
-  CheckSquare,
-  Square,
   RotateCcw,
   Target,
   Sparkles,
-  Globe
+  Globe,
+  CheckSquare,
+  Square
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -37,6 +37,7 @@ interface SidebarProps {
   onClearPackageFilter: () => void;
   includeExternal: boolean;
   onToggleIncludeExternal: () => void;
+  onDrillDown?: (targetId: string, targetView: 'modules' | 'packages' | 'classes') => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -58,14 +59,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onClearPackageFilter,
   includeExternal,
   onToggleIncludeExternal,
+  onDrillDown,
 }) => {
-  const [expandedPkgs, setExpandedPkgs] = useState<Record<string, boolean>>({
-    'org.springframework.samples.petclinic.model': true,
-    'org.springframework.samples.petclinic.service': true,
-    'org.springframework.samples.petclinic.controller': true,
-  });
-  const [showModuleFilter, setShowModuleFilter] = useState<boolean>(true);
-  const [showPackageFilter, setShowPackageFilter] = useState<boolean>(true);
+  const [expandedMods, setExpandedMods] = useState<Record<string, boolean>>({});
+  const [expandedPkgs, setExpandedPkgs] = useState<Record<string, boolean>>({});
+
+  const toggleMod = (modId: string) => {
+    setExpandedMods((prev) => ({ ...prev, [modId]: !prev[modId] }));
+  };
 
   const togglePkg = (pkgId: string) => {
     setExpandedPkgs((prev) => ({ ...prev, [pkgId]: !prev[pkgId] }));
@@ -74,23 +75,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const hasModuleFilter = selectedModules.length > 0;
   const hasPackageFilter = selectedPackages.length > 0;
 
-  // Filter packages by active module filter with useMemo
-  const visiblePackages = useMemo(() => {
-    if (!project) return [];
-    return project.packages.filter((pkg) => {
-      if (hasModuleFilter && !selectedModules.includes(pkg.module_name)) {
-        return false;
-      }
-      return true;
-    });
-  }, [project, hasModuleFilter, selectedModules]);
-
   // Filter classes by active module & package filters & search with useMemo
   const filteredClasses = useMemo(() => {
     if (!project) return [];
     const term = searchTerm.trim().toLowerCase();
     return project.classes.filter((c: ClassInfo) => {
-      if (hideDTOs && (c.name.endsWith('Dto') || c.name.endsWith('DTO'))) return false;
+      if (hideDTOs && (c.name.endsWith('Dto') || c.name.endsWith('DTO') || c.name.endsWith('VO'))) return false;
       if (hasModuleFilter && !selectedModules.includes(c.module_name)) return false;
       if (hasPackageFilter && !selectedPackages.includes(c.package_name)) return false;
       if (!term) return true;
@@ -101,163 +91,76 @@ export const Sidebar: React.FC<SidebarProps> = ({
     });
   }, [project, hideDTOs, hasModuleFilter, selectedModules, hasPackageFilter, selectedPackages, searchTerm]);
 
-  // O(1) Pre-grouping by package_name for lightning-fast rendering (0 lag for 100k classes)
-  const classesByPackageMap = useMemo(() => {
-    const map = new Map<string, ClassInfo[]>();
+  // Pre-index classes by module and package for O(1) hierarchy building
+  const { classesByPkgMap, packagesByModMap } = useMemo(() => {
+    const pkgMap = new Map<string, ClassInfo[]>();
     for (const c of filteredClasses) {
-      let listByName = map.get(c.package_name);
-      if (!listByName) {
-        listByName = [];
-        map.set(c.package_name, listByName);
+      let list = pkgMap.get(c.package_name);
+      if (!list) {
+        list = [];
+        pkgMap.set(c.package_name, list);
       }
-      listByName.push(c);
+      list.push(c);
+    }
 
-      // Also map by short package name for reliable lookups
-      if (c.package_name.includes('.')) {
-        const short = c.package_name.split('.').slice(-2).join('.');
-        let listByShort = map.get(short);
-        if (!listByShort) {
-          listByShort = [];
-          map.set(short, listByShort);
+    const modMap = new Map<string, PackageInfo[]>();
+    if (project) {
+      for (const p of project.packages) {
+        const modKey = p.module_name || 'default';
+        let list = modMap.get(modKey);
+        if (!list) {
+          list = [];
+          modMap.set(modKey, list);
         }
-        listByShort.push(c);
+        list.push(p);
       }
     }
-    return map;
-  }, [filteredClasses]);
+
+    return { classesByPkgMap: pkgMap, packagesByModMap: modMap };
+  }, [filteredClasses, project]);
 
   if (!project) return null;
 
+  const modulesList = project.modules.length > 0
+    ? project.modules
+    : [{ id: 'default', name: project.project_name, path: '', build_type: '', direct_dependencies: [], exported_packages: [], afferent_coupling: 0, efferent_coupling: 0, instability: 0 }];
+
   return (
-    <div className="w-80 h-full flex flex-col bg-[#161b22] border-r border-[#30363d] overflow-hidden flex-shrink-0">
+    <div className="w-80 h-full flex flex-col bg-[#161b22] border-r border-[#30363d] overflow-hidden flex-shrink-0 select-none">
       {/* Search Input */}
-      <div className="p-3 border-b border-[#30363d] bg-black/10">
+      <div className="p-3 border-b border-[#30363d] bg-black/15">
         <div className="relative">
           <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Пошук класів / пакетів..."
+            placeholder="Пошук модулів, пакетів, класів..."
             value={searchTerm}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full bg-[#0d1117] border border-[#30363d] rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-400 focus:outline-none focus:border-sky-500 transition-colors font-mono"
+            className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-sky-500 transition-colors font-mono"
           />
         </div>
       </div>
 
-      {/* 1. MODULE SCOPING FILTER (If project has modules) */}
-      {project.modules.length > 0 && (
-        <div className="border-b border-[#30363d] bg-[#161b22]">
-          <div className="px-3 py-2 flex items-center justify-between text-xs font-bold text-slate-300">
-            <button
-              onClick={() => setShowModuleFilter(!showModuleFilter)}
-              className="flex items-center gap-1.5 hover:text-sky-400 transition-colors uppercase tracking-wider text-[10px]"
-            >
-              {showModuleFilter ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
-              <Box className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Фільтр Модулів ({selectedModules.length > 0 ? `${selectedModules.length}/${project.modules.length}` : 'Всі'})</span>
-            </button>
-            {hasModuleFilter && (
-              <button
-                onClick={onClearModuleFilter}
-                className="text-[10px] text-sky-400 hover:text-sky-300 font-mono flex items-center gap-1"
-                title="Показати всі модулі"
-              >
-                <RotateCcw className="w-2.5 h-2.5" /> Всі
-              </button>
-            )}
+      {/* Active Filter Scope Indicators */}
+      {(hasModuleFilter || hasPackageFilter) && (
+        <div className="px-3 py-2 border-b border-[#30363d] bg-sky-950/20 flex items-center justify-between text-xs">
+          <div className="flex items-center gap-1 text-sky-300 font-mono text-[11px] truncate">
+            <Filter className="w-3 h-3 text-sky-400 flex-shrink-0" />
+            <span className="truncate">
+              {hasModuleFilter && `${selectedModules.length} мод.`}
+              {hasModuleFilter && hasPackageFilter && ' • '}
+              {hasPackageFilter && `${selectedPackages.length} пак.`}
+            </span>
           </div>
-
-          {showModuleFilter && (
-            <div className="px-3 pb-2.5 space-y-1 max-h-32 overflow-y-auto">
-              {project.modules.map((m: ModuleInfo) => {
-                const isChecked = selectedModules.length === 0 || selectedModules.includes(m.id);
-                return (
-                  <div
-                    key={m.id}
-                    className="flex items-center justify-between text-xs font-mono py-1 px-1.5 rounded hover:bg-white/5 group"
-                  >
-                    <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0">
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        onChange={() => onToggleModule(m.id)}
-                        className="rounded border-[#30363d] bg-[#0d1117] text-emerald-500 focus:ring-0 w-3.5 h-3.5"
-                      />
-                      <span className={`truncate ${isChecked ? 'text-slate-200 font-semibold' : 'text-slate-400'}`}>
-                        {m.name}
-                      </span>
-                    </label>
-                    <button
-                      onClick={() => onSelectOnlyModule(m.id)}
-                      className="opacity-0 group-hover:opacity-100 text-[10px] text-emerald-400 hover:underline px-1 rounded bg-emerald-500/10 transition-opacity"
-                      title="Показати тільки цей модуль"
-                    >
-                      Тільки
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          <button
+            onClick={() => { onClearModuleFilter(); onClearPackageFilter(); }}
+            className="text-[10px] text-sky-400 hover:text-sky-200 font-mono flex items-center gap-1 ml-2 flex-shrink-0"
+            title="Скинути всі фільтри"
+          >
+            <RotateCcw className="w-2.5 h-2.5" /> Скинути
+          </button>
         </div>
       )}
-
-      {/* 2. PACKAGE SCOPING FILTER */}
-      <div className="border-b border-[#30363d] bg-[#161b22]">
-        <div className="px-3 py-2 flex items-center justify-between text-xs font-bold text-slate-300">
-          <button
-            onClick={() => setShowPackageFilter(!showPackageFilter)}
-            className="flex items-center gap-1.5 hover:text-purple-400 transition-colors uppercase tracking-wider text-[10px]"
-          >
-            {showPackageFilter ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
-            <Folder className="w-3.5 h-3.5 text-purple-400" />
-            <span>Фільтр Пакетів ({selectedPackages.length > 0 ? `${selectedPackages.length}/${visiblePackages.length}` : 'Всі'})</span>
-          </button>
-          {hasPackageFilter && (
-            <button
-              onClick={onClearPackageFilter}
-              className="text-[10px] text-purple-400 hover:text-purple-300 font-mono flex items-center gap-1"
-              title="Показати всі пакети"
-            >
-              <RotateCcw className="w-2.5 h-2.5" /> Всі
-            </button>
-          )}
-        </div>
-
-        {showPackageFilter && (
-          <div className="px-3 pb-2.5 space-y-1 max-h-36 overflow-y-auto">
-            {visiblePackages.slice(0, 40).map((p: PackageInfo) => {
-              const isChecked = selectedPackages.length === 0 || selectedPackages.includes(p.id);
-              const shortName = p.name.split('.').slice(-2).join('.');
-              return (
-                <div
-                  key={p.id}
-                  className="flex items-center justify-between text-xs font-mono py-1 px-1.5 rounded hover:bg-white/5 group"
-                >
-                  <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0" title={p.name}>
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() => onTogglePackage(p.id)}
-                      className="rounded border-[#30363d] bg-[#0d1117] text-purple-500 focus:ring-0 w-3.5 h-3.5"
-                    />
-                    <span className={`truncate ${isChecked ? 'text-slate-200 font-semibold' : 'text-slate-400'}`}>
-                      {shortName}
-                    </span>
-                  </label>
-                  <button
-                    onClick={() => onSelectOnlyPackage(p.id)}
-                    className="opacity-0 group-hover:opacity-100 text-[10px] text-purple-400 hover:underline px-1 rounded bg-purple-500/10 transition-opacity"
-                    title="Показати тільки класи цього пакета"
-                  >
-                    Тільки
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
 
       {/* Quick Controls: DTO & Include External Toggle */}
       <div className="px-3 py-2 border-b border-[#30363d] bg-black/20 flex flex-col gap-1.5 text-[11px] text-slate-400">
@@ -270,7 +173,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
           <span className="flex items-center gap-1 text-slate-300 font-semibold">
             <Globe className="w-3 h-3 text-purple-400" />
-            <span>Показувати зовнішні зв'язки</span>
+            <span>Зовнішні зв'язки</span>
           </span>
         </label>
 
@@ -285,112 +188,157 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </label>
       </div>
 
-      {/* Project Structure Tree */}
+      {/* 3-Level Hierarchical Tree: Module ➔ Package ➔ Class */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 px-2 py-1 flex items-center justify-between">
           <span className="flex items-center gap-1">
-            <Layers className="w-3 h-3 text-sky-400" /> Класи ({filteredClasses.length.toLocaleString()})
+            <Layers className="w-3 h-3 text-emerald-400" /> Ієрархія ({modulesList.length} мод. • {filteredClasses.length} клас.)
           </span>
-          {visiblePackages.length > 50 && (
-            <span className="text-[9px] text-amber-400 font-mono">
-              ⚡ Топ-{Math.min(50, visiblePackages.length)}
-            </span>
-          )}
         </div>
 
-        {visiblePackages.slice(0, 50).map((pkg: PackageInfo) => {
-          if (hasPackageFilter && !selectedPackages.includes(pkg.id)) return null;
-
-          const isExpanded = expandedPkgs[pkg.id] ?? (visiblePackages.length <= 8);
-          const pkgClasses = classesByPackageMap.get(pkg.name) || classesByPackageMap.get(pkg.id) || [];
-          if (searchTerm && pkgClasses.length === 0) return null;
-
-          const renderedClasses = searchTerm ? pkgClasses : pkgClasses.slice(0, 30);
+        {modulesList.map((m) => {
+          const isModExpanded = expandedMods[m.id] ?? (modulesList.length <= 3 || searchTerm.length > 0);
+          const modPackages = packagesByModMap.get(m.id) || [];
+          const isModSelected = selectedModules.includes(m.id);
 
           return (
-            <div key={pkg.id} className="space-y-0.5">
-              {/* Package Header */}
+            <div key={m.id} className="space-y-0.5">
+              {/* Level 1: Module Header */}
               <div
                 className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-mono transition-colors group ${
-                  selectedNodeId === pkg.id
-                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                    : 'text-slate-300 hover:bg-white/5'
+                  isModSelected
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                    : selectedNodeId === m.id
+                    ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+                    : 'text-slate-200 hover:bg-white/5'
                 }`}
               >
-                <button onClick={() => togglePkg(pkg.id)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
-                  {isExpanded ? (
+                <button onClick={() => toggleMod(m.id)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
+                  {isModExpanded ? (
                     <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                   ) : (
                     <ChevronRight className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                   )}
-                  {isExpanded ? (
-                    <FolderOpen className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                  ) : (
-                    <Folder className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                  )}
-                  <span className="truncate flex-1" title={pkg.name}>
-                    {pkg.name.split('.').slice(-2).join('.')}
+                  <Box className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                  <span className="truncate flex-1 font-bold text-[11px]" title={m.name}>
+                    {m.name}
                   </span>
                 </button>
 
                 <div className="flex items-center gap-1">
                   <button
-                    onClick={() => onSelectOnlyPackage(pkg.id)}
-                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-purple-500/20 rounded text-purple-400 transition-opacity"
-                    title="Ізолювати цей пакет на графі"
+                    onClick={() => {
+                      onSelectOnlyModule(m.id);
+                      if (onDrillDown) onDrillDown(m.id, 'packages');
+                    }}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-emerald-500/20 rounded text-emerald-400 transition-opacity text-[10px] font-semibold"
+                    title="Фокусувати цей модуль на графі"
                   >
                     <Target className="w-3 h-3" />
                   </button>
-                  <span className="text-[10px] text-slate-400 px-1 rounded bg-black/30">
-                    {pkgClasses.length}
+                  <span className="text-[9px] text-slate-400 px-1 rounded bg-black/40">
+                    {modPackages.length} пак.
                   </span>
                 </div>
               </div>
 
-              {/* Classes in Package */}
-              {isExpanded && (
-                <div className="pl-4 space-y-0.5 border-l border-white/5 ml-3">
-                  {renderedClasses.map((cls: ClassInfo) => {
-                    const isSelected = selectedNodeId === cls.id;
+              {/* Level 2: Packages of this Module */}
+              {isModExpanded && (
+                <div className="pl-3 space-y-0.5 border-l border-emerald-500/10 ml-3.5">
+                  {modPackages.map((pkg) => {
+                    const isPkgExpanded = expandedPkgs[pkg.id] ?? (modPackages.length <= 4 || searchTerm.length > 0);
+                    const pkgClasses = classesByPkgMap.get(pkg.name) || classesByPkgMap.get(pkg.id) || [];
+                    if (searchTerm && pkgClasses.length === 0) return null;
+
+                    const isPkgSelected = selectedPackages.includes(pkg.id);
+                    const shortPkgName = pkg.name.split('.').slice(-2).join('.');
+
                     return (
-                      <button
-                        key={cls.id}
-                        onClick={() => onSelectNode(cls.id)}
-                        className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-mono transition-all text-left truncate ${
-                          isSelected
-                            ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 font-semibold shadow-sm'
-                            : 'text-slate-300 hover:bg-white/5 hover:text-white'
-                        }`}
-                        title={cls.id}
-                      >
-                        <FileCode className={`w-3 h-3 flex-shrink-0 ${isSelected ? 'text-sky-400' : 'text-slate-400'}`} />
-                        <span className="truncate">{cls.name}</span>
-                        {cls.annotations.length > 0 && (
-                          <span className="text-[9px] text-amber-400 ml-auto flex-shrink-0">
-                            @{cls.annotations[0]}
-                          </span>
+                      <div key={pkg.id} className="space-y-0.5">
+                        {/* Package Header */}
+                        <div
+                          className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-mono transition-colors group ${
+                            isPkgSelected
+                              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                              : selectedNodeId === pkg.id
+                              ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+                              : 'text-slate-300 hover:bg-white/5'
+                          }`}
+                        >
+                          <button onClick={() => togglePkg(pkg.id)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
+                            {isPkgExpanded ? (
+                              <ChevronDown className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                            ) : (
+                              <ChevronRight className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                            )}
+                            {isPkgExpanded ? (
+                              <FolderOpen className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                            ) : (
+                              <Folder className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                            )}
+                            <span className="truncate flex-1 text-[11px]" title={pkg.name}>
+                              {shortPkgName}
+                            </span>
+                          </button>
+
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                onSelectOnlyPackage(pkg.id);
+                                if (onDrillDown) onDrillDown(pkg.id, 'classes');
+                              }}
+                              className="opacity-0 group-hover:opacity-100 p-1 hover:bg-purple-500/20 rounded text-purple-400 transition-opacity"
+                              title="Ізолювати класи цього пакета на графі"
+                            >
+                              <Target className="w-3 h-3" />
+                            </button>
+                            <span className="text-[9px] text-slate-400 px-1 rounded bg-black/40">
+                              {pkgClasses.length}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Level 3: Classes in Package */}
+                        {isPkgExpanded && (
+                          <div className="pl-3 space-y-0.5 border-l border-purple-500/10 ml-3">
+                            {pkgClasses.slice(0, 30).map((cls) => {
+                              const isClassSelected = selectedNodeId === cls.id;
+                              return (
+                                <button
+                                  key={cls.id}
+                                  onClick={() => onSelectNode(cls.id)}
+                                  className={`w-full flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono transition-all text-left truncate ${
+                                    isClassSelected
+                                      ? 'bg-sky-500/25 text-sky-300 border border-sky-500/50 font-bold shadow-sm'
+                                      : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
+                                  }`}
+                                  title={cls.id}
+                                >
+                                  <FileCode className={`w-3 h-3 flex-shrink-0 ${isClassSelected ? 'text-sky-400' : 'text-slate-500'}`} />
+                                  <span className="truncate">{cls.name}</span>
+                                  {cls.annotations.length > 0 && (
+                                    <span className="text-[8px] text-amber-400 ml-auto flex-shrink-0 font-normal">
+                                      @{cls.annotations[0]}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                            {pkgClasses.length > 30 && (
+                              <div className="text-[9px] font-mono text-slate-500 px-2 py-0.5 italic">
+                                +ще {pkgClasses.length - 30} класів
+                              </div>
+                            )}
+                          </div>
                         )}
-                      </button>
+                      </div>
                     );
                   })}
-                  {!searchTerm && pkgClasses.length > 30 && (
-                    <div className="text-[10px] font-mono text-slate-400 px-2 py-0.5 italic">
-                      +ще {pkgClasses.length - 30} класів (введіть пошук)
-                    </div>
-                  )}
                 </div>
               )}
             </div>
           );
         })}
-
-        {visiblePackages.length > 50 && !searchTerm && (
-          <div className="p-3 text-center text-[11px] font-mono text-slate-400 border-t border-white/5">
-            Показано перші 50 пакетів із {visiblePackages.length}.
-            <br />
-            <span className="text-sky-400">Скористайтеся пошуком вище 🔍</span>
-          </div>
-        )}
       </div>
     </div>
   );

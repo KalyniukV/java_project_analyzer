@@ -5,6 +5,7 @@ import { Header } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { InspectorPanel } from './components/inspector/InspectorPanel';
 import { GraphCanvas } from './components/views/GraphCanvas';
+import { MatrixView } from './components/views/MatrixView';
 import { CyclesView } from './components/views/CyclesView';
 import { MetricsView } from './components/views/MetricsView';
 import { ImpactView } from './components/views/ImpactView';
@@ -16,7 +17,7 @@ import { ScanProgressModal } from './components/ScanProgressModal';
 export function App() {
   const [project, setProject] = useState<ProjectModel | null>(null);
   const [activeTab, setActiveTab] = useState<
-    'modules' | 'packages' | 'classes' | 'impact' | 'drift' | 'extraction' | 'cycles' | 'metrics'
+    'modules' | 'packages' | 'classes' | 'matrix' | 'impact' | 'drift' | 'extraction' | 'cycles' | 'metrics'
   >('modules');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [callHierarchyTarget, setCallHierarchyTarget] = useState<string | null>(null);
@@ -55,7 +56,7 @@ export function App() {
         } catch {
           // ignore transient poll errors
         }
-      }, 120);
+      }, 300);
 
       await scanProject(path);
 
@@ -98,25 +99,24 @@ export function App() {
         error: err?.message || String(err),
       }));
     } finally {
+      setIsScanning(false);
       if (progressIntervalRef.current) {
         clearInterval(progressIntervalRef.current);
         progressIntervalRef.current = null;
       }
-      setIsScanning(false);
     }
   }, []);
 
-  // Load project from NoSQL DB
-  const handleLoadFromNoSQL = useCallback(async (path: string) => {
+  // Load directly from embedded NoSQL database (redb) instantly
+  const handleLoadFromNoSQL = useCallback(async (rootPath: string) => {
     try {
       setIsScanning(true);
-      await loadStoredProject(path);
-      const proj = await getProject();
+      const proj = await loadStoredProject(rootPath);
       setProject(proj);
       setSelectedNodeId(null);
       setSelectedModules([]);
       setSelectedPackages([]);
-      if (proj && proj.modules && proj.modules.length > 1) {
+      if (proj.modules && proj.modules.length > 1) {
         setActiveTab('modules');
       } else {
         setActiveTab('packages');
@@ -154,47 +154,75 @@ export function App() {
 
   // Fetch updated graph when tab, selected node, depth, isolate mode, module/package filters, or external toggle change
   useEffect(() => {
-    if (!project) return;
-    if (
-      activeTab === 'cycles' ||
-      activeTab === 'metrics' ||
-      activeTab === 'impact' ||
-      activeTab === 'drift' ||
-      activeTab === 'extraction'
-    ) {
-      return;
+    let isMounted = true;
+
+    if (activeTab === 'modules' || activeTab === 'packages' || activeTab === 'classes') {
+      getGraph(
+        activeTab,
+        selectedNodeId || undefined,
+        depth,
+        isolateMode,
+        selectedModules.length > 0 ? selectedModules : undefined,
+        selectedPackages.length > 0 ? selectedPackages : undefined,
+        includeExternal
+      )
+        .then((data) => {
+          if (isMounted) {
+            setGraphData(data);
+          }
+        })
+        .catch((err) => {
+          console.error('Failed to fetch graph payload:', err);
+        });
     }
 
-    getGraph(
-      activeTab,
-      selectedNodeId || undefined,
-      depth,
-      isolateMode,
-      selectedModules.length > 0 ? selectedModules : undefined,
-      selectedPackages.length > 0 ? selectedPackages : undefined,
-      includeExternal
-    )
-      .then((data) => setGraphData(data))
-      .catch((err) => console.error('Graph fetch error:', err));
-  }, [project, activeTab, selectedNodeId, depth, isolateMode, selectedModules, selectedPackages, includeExternal]);
+    return () => {
+      isMounted = false;
+    };
+  }, [activeTab, selectedNodeId, depth, isolateMode, selectedModules, selectedPackages, includeExternal]);
 
-  // Select node inside current graph
+  // Handle node selection from graph or sidebar
   const handleSelectNode = (nodeId: string) => {
-    setSelectedNodeId(nodeId);
+    setSelectedNodeId((prev) => (prev === nodeId ? null : nodeId));
   };
 
-  // Navigate directly from any analytical view (Impact, Drift, Extraction, Cycles, Metrics) to the graph
-  const handleNavigateToGraph = useCallback(
-    (nodeId: string, view: 'modules' | 'packages' | 'classes' = 'classes') => {
-      setSelectedNodeId(nodeId);
-      setActiveTab(view);
-    },
-    []
-  );
-
-  // Clear canvas selection
+  // Handle clicking empty canvas space to deselect
   const handleCanvasClick = () => {
     setSelectedNodeId(null);
+  };
+
+  // Direct Drill-down helper
+  const handleDrillDown = useCallback((targetId: string, targetView: 'modules' | 'packages' | 'classes') => {
+    if (targetView === 'packages') {
+      setSelectedModules([targetId]);
+      setActiveTab('packages');
+      setSelectedNodeId(null);
+    } else if (targetView === 'classes') {
+      setSelectedPackages([targetId]);
+      setActiveTab('classes');
+      setSelectedNodeId(null);
+    } else {
+      setSelectedModules([]);
+      setSelectedPackages([]);
+      setActiveTab('modules');
+      setSelectedNodeId(null);
+    }
+  }, []);
+
+  const handleNavigateView = useCallback((view: 'modules' | 'packages' | 'classes') => {
+    if (view === 'modules') {
+      setSelectedModules([]);
+      setSelectedPackages([]);
+    } else if (view === 'packages') {
+      setSelectedPackages([]);
+    }
+    setActiveTab(view);
+  }, []);
+
+  // Navigation from DSM Matrix, Cycles, or Impact views directly to Graph View
+  const handleNavigateToGraph = (nodeId: string, view: 'modules' | 'packages' | 'classes' = 'classes') => {
+    setActiveTab(view);
+    setSelectedNodeId(nodeId);
   };
 
   // Module filter helpers
@@ -220,7 +248,7 @@ export function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#0d1117] text-slate-100 font-sans">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-[#0d1117] text-slate-100 font-sans select-none">
       {/* Top Header Bar */}
       <Header
         project={project}
@@ -250,20 +278,28 @@ export function App() {
             onToggleHideDTOs={() => setHideDTOs(!hideDTOs)}
             selectedModules={selectedModules}
             onToggleModule={handleToggleModuleFilter}
-            onSelectOnlyModule={(m) => setSelectedModules([m])}
+            onSelectOnlyModule={(m) => { setSelectedModules([m]); setActiveTab('packages'); }}
             onClearModuleFilter={handleClearModuleFilter}
             selectedPackages={selectedPackages}
             onTogglePackage={handleTogglePackageFilter}
-            onSelectOnlyPackage={(p) => setSelectedPackages([p])}
+            onSelectOnlyPackage={(p) => { setSelectedPackages([p]); setActiveTab('classes'); }}
             onClearPackageFilter={handleClearPackageFilter}
             includeExternal={includeExternal}
             onToggleIncludeExternal={() => setIncludeExternal(!includeExternal)}
+            onDrillDown={handleDrillDown}
           />
         )}
 
         {/* Dynamic Main View Area */}
         <main className="flex-1 h-full overflow-hidden relative flex flex-col bg-[#0d1117]">
-          {activeTab === 'cycles' ? (
+          {activeTab === 'matrix' ? (
+            <MatrixView
+              project={project}
+              onNavigateToGraph={handleNavigateToGraph}
+              onSelectModule={(m) => handleDrillDown(m, 'packages')}
+              onSelectPackage={(p) => handleDrillDown(p, 'classes')}
+            />
+          ) : activeTab === 'cycles' ? (
             <CyclesView onSelectNode={(nodeId) => handleNavigateToGraph(nodeId, 'classes')} />
           ) : activeTab === 'metrics' ? (
             <MetricsView project={project} onSelectNode={(nodeId) => handleNavigateToGraph(nodeId, 'packages')} />
@@ -288,12 +324,15 @@ export function App() {
               selectedNodeId={selectedNodeId}
               onSelectNode={handleSelectNode}
               onCanvasClick={handleCanvasClick}
+              activeView={activeTab as any}
               selectedModules={selectedModules}
               selectedPackages={selectedPackages}
               onClearModuleFilter={handleClearModuleFilter}
               onClearPackageFilter={handleClearPackageFilter}
               includeExternal={includeExternal}
               onToggleIncludeExternal={() => setIncludeExternal(!includeExternal)}
+              onDrillDown={handleDrillDown}
+              onNavigateView={handleNavigateView}
             />
           )}
         </main>

@@ -22,8 +22,8 @@ import {
 
 interface HeaderProps {
   project: ProjectModel | null;
-  activeTab: 'modules' | 'packages' | 'classes' | 'impact' | 'drift' | 'extraction' | 'cycles' | 'metrics';
-  onTabChange: (tab: 'modules' | 'packages' | 'classes' | 'impact' | 'drift' | 'extraction' | 'cycles' | 'metrics') => void;
+  activeTab: 'modules' | 'packages' | 'classes' | 'matrix' | 'impact' | 'drift' | 'extraction' | 'cycles' | 'metrics';
+  onTabChange: (tab: 'modules' | 'packages' | 'classes' | 'matrix' | 'impact' | 'drift' | 'extraction' | 'cycles' | 'metrics') => void;
   depth: number;
   onDepthChange: (depth: number) => void;
   isolateMode: boolean;
@@ -156,6 +156,19 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <FileCode className="w-3.5 h-3.5" />
           <span>Класи</span>
+        </button>
+
+        <button
+          onClick={() => onTabChange('matrix')}
+          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+            activeTab === 'matrix'
+              ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40 shadow-sm'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+          title="Dependency Structure Matrix (DSM) — таблиця зв'язків без перетинів ліній"
+        >
+          <BarChart3 className="w-3.5 h-3.5 text-teal-400" />
+          <span>Матриця DSM</span>
         </button>
 
         <div className="w-px h-4 bg-[#30363d] mx-0.5" />

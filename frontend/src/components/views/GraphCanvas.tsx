@@ -26,7 +26,9 @@ import {
   Maximize2,
   Folder,
   X,
-  Globe
+  Globe,
+  ChevronRight,
+  Home
 } from 'lucide-react';
 
 interface GraphCanvasProps {
@@ -34,12 +36,15 @@ interface GraphCanvasProps {
   selectedNodeId: string | null;
   onSelectNode: (nodeId: string) => void;
   onCanvasClick: () => void;
+  activeView: 'modules' | 'packages' | 'classes';
   selectedModules?: string[];
   selectedPackages?: string[];
   onClearModuleFilter?: () => void;
   onClearPackageFilter?: () => void;
   includeExternal?: boolean;
   onToggleIncludeExternal?: () => void;
+  onDrillDown?: (targetId: string, targetView: 'modules' | 'packages' | 'classes') => void;
+  onNavigateView?: (view: 'modules' | 'packages' | 'classes') => void;
 }
 
 const nodeTypes = {
@@ -55,12 +60,15 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   selectedNodeId,
   onSelectNode,
   onCanvasClick,
+  activeView,
   selectedModules = [],
   selectedPackages = [],
   onClearModuleFilter,
   onClearPackageFilter,
   includeExternal = false,
   onToggleIncludeExternal,
+  onDrillDown,
+  onNavigateView,
 }) => {
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('layered');
   const [hideDTOs, setHideDTOs] = useState<boolean>(false);
@@ -93,47 +101,59 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     }));
 
     // 3. Map edges with decluttering & active isolation
-    const rfEdges: Edge[] = graphData.edges
-      .filter((edge) => activeNodeIds.has(edge.source) && activeNodeIds.has(edge.target))
-      .filter((edge) => {
-        if (onlyActiveEdges && selectedNodeId) {
-          return edge.highlight_state !== 'Dimmed' && edge.highlight_state !== 'Normal';
-        }
-        return true;
-      })
-      .map((edge: VisualGraphEdge) => {
-        const isHighlighted = edge.highlight_state !== 'Normal' && edge.highlight_state !== 'Dimmed';
-        const isIndirect = edge.hop_depth !== undefined && edge.hop_depth >= 2;
+    let rawEdges = graphData.edges.filter((edge) => activeNodeIds.has(edge.source) && activeNodeIds.has(edge.target));
 
-        let markerColor = '#4b5563';
-        if (edge.highlight_state === 'InboundActive') {
-          markerColor = isIndirect ? '#818cf8' : '#38bdf8';
-        } else if (edge.highlight_state === 'OutboundActive') {
-          markerColor = isIndirect ? '#fbbf24' : (edge.kind === 'GwtRpcCall' || edge.kind === 'GwtRpcBinding' ? '#e879f9' : '#fb923c');
-        } else if (edge.is_circular) {
-          markerColor = '#ef4444';
-        } else if (edge.kind === 'GwtRpcCall' || edge.kind === 'GwtRpcBinding') {
-          markerColor = '#c084fc';
-        }
+    if (onlyActiveEdges && selectedNodeId) {
+      rawEdges = rawEdges.filter((edge) => edge.highlight_state !== 'Dimmed' && edge.highlight_state !== 'Normal');
+    } else if (rawEdges.length > 150 && !selectedNodeId) {
+      // Smart edge capping: prioritize circular & inter-module edges
+      const priorityEdges = rawEdges.filter(e => e.is_circular || e.kind === 'ModuleDependency' || e.kind === 'PackageDependency');
+      rawEdges = priorityEdges.length > 0 ? priorityEdges.slice(0, 120) : rawEdges.slice(0, 100);
+    }
 
-        return {
-          id: edge.id,
-          source: edge.source,
-          target: edge.target,
-          type: 'customEdge',
-          data: { ...edge },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            width: isIndirect ? 11 : isHighlighted ? 16 : 12,
-            height: isIndirect ? 11 : isHighlighted ? 16 : 12,
-            color: markerColor,
-          },
-          animated: isHighlighted && !isIndirect,
-        };
-      });
+    const rfEdges: Edge[] = rawEdges.map((edge: VisualGraphEdge) => {
+      const isHighlighted = edge.highlight_state !== 'Normal' && edge.highlight_state !== 'Dimmed';
+      const isIndirect = edge.hop_depth !== undefined && edge.hop_depth >= 2;
+
+      let markerColor = '#4b5563';
+      if (edge.highlight_state === 'InboundActive') {
+        markerColor = isIndirect ? '#818cf8' : '#38bdf8';
+      } else if (edge.highlight_state === 'OutboundActive') {
+        markerColor = isIndirect ? '#fbbf24' : (edge.kind === 'GwtRpcCall' || edge.kind === 'GwtRpcBinding' ? '#e879f9' : '#fb923c');
+      } else if (edge.is_circular) {
+        markerColor = '#ef4444';
+      } else if (edge.kind === 'GwtRpcCall' || edge.kind === 'GwtRpcBinding') {
+        markerColor = '#c084fc';
+      }
+
+      return {
+        id: edge.id,
+        source: edge.source,
+        target: edge.target,
+        type: 'customEdge',
+        data: { ...edge },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: isIndirect ? 11 : isHighlighted ? 16 : 12,
+          height: isIndirect ? 11 : isHighlighted ? 16 : 12,
+          color: markerColor,
+        },
+        animated: isHighlighted && !isIndirect,
+      };
+    });
 
     return { nodes: rfNodes, edges: rfEdges, swimlanes: layout.swimlanes };
   }, [graphData, selectedNodeId, layoutMode, hideDTOs, onlyActiveEdges]);
+
+  // Handle double click for drill-down
+  const handleNodeDoubleClick = (_: React.MouseEvent, node: Node) => {
+    const nodeData = node.data as any;
+    if (nodeData.category === 'module' && onDrillDown) {
+      onDrillDown(node.id, 'packages');
+    } else if (nodeData.category === 'package' && onDrillDown) {
+      onDrillDown(node.id, 'classes');
+    }
+  };
 
   return (
     <div className="w-full h-full relative bg-[#0d1117]">
@@ -162,8 +182,48 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         </div>
       )}
 
-      {/* Top Floating Controls Bar */}
+      {/* Top Floating Breadcrumb Bar */}
       <div className="absolute top-4 left-4 z-20 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1.5 bg-[#161b22]/95 border border-[#30363d] px-3 py-1.5 rounded-xl shadow-2xl backdrop-blur-md text-xs font-mono">
+          <button
+            onClick={() => onNavigateView && onNavigateView('modules')}
+            className={`flex items-center gap-1 hover:text-sky-300 transition ${
+              activeView === 'modules' ? 'text-sky-400 font-bold' : 'text-slate-400'
+            }`}
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span>Всі модулі</span>
+          </button>
+
+          {selectedModules.length > 0 && (
+            <>
+              <ChevronRight className="w-3 h-3 text-slate-600" />
+              <button
+                onClick={() => onNavigateView && onNavigateView('packages')}
+                className={`flex items-center gap-1 hover:text-emerald-300 transition ${
+                  activeView === 'packages' ? 'text-emerald-400 font-bold' : 'text-slate-400'
+                }`}
+                title={selectedModules[0]}
+              >
+                <Box className="w-3 h-3 text-emerald-400" />
+                <span className="truncate max-w-[120px]">{selectedModules[0]}</span>
+              </button>
+            </>
+          )}
+
+          {selectedPackages.length > 0 && (
+            <>
+              <ChevronRight className="w-3 h-3 text-slate-600" />
+              <span className="flex items-center gap-1 text-purple-400 font-bold" title={selectedPackages[0]}>
+                <Folder className="w-3 h-3 text-purple-400" />
+                <span className="truncate max-w-[140px]">
+                  {selectedPackages[0].split('.').slice(-2).join('.')}
+                </span>
+              </span>
+            </>
+          )}
+        </div>
+
         {/* Layout Engine Switcher */}
         <div className="flex items-center gap-1 bg-[#161b22]/95 border border-[#30363d] p-1 rounded-xl shadow-2xl backdrop-blur-md">
           <button
@@ -173,7 +233,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Архітектурний потік зверху-вниз (UI -> Service -> Repo -> Domain)"
+            title="Архітектурний потік зверху-вниз"
           >
             <Layers className="w-3.5 h-3.5 text-sky-400" />
             <span>Шари</span>
@@ -186,7 +246,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Групувати класи в острови пакетів"
+            title="Групувати в острови пакетів"
           >
             <Box className="w-3.5 h-3.5 text-purple-400" />
             <span>Пакети</span>
@@ -199,7 +259,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="3 Колонки: Вхідні виклики -> Цільовий клас -> Вихідні залежності"
+            title="3 Колонки: Вхідні -> Ціль -> Вихідні"
           >
             <Target className="w-3.5 h-3.5 text-rose-400" />
             <span>Фокус</span>
@@ -212,14 +272,14 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Компактна сітка"
+            title="Компактна матрична сітка"
           >
             <Grid className="w-3.5 h-3.5 text-emerald-400" />
             <span>Сітка</span>
           </button>
         </div>
 
-        {/* Quick Toggles: Hide DTOs, Only Active Edges, and Include External Neighbors */}
+        {/* Quick Toggles: Hide DTOs, Only Active Edges */}
         <div className="flex items-center gap-1 bg-[#161b22]/95 border border-[#30363d] p-1 rounded-xl shadow-2xl backdrop-blur-md text-xs">
           {onToggleIncludeExternal && (
             <button
@@ -229,10 +289,10 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                   ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40 shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="Відображати зовнішні класи/пакети/модулі, які мають зв'язки з вибраними"
+              title="Відображати зовнішні залежності"
             >
               <Globe className="w-3.5 h-3.5 text-purple-400" />
-              <span>Зовнішні зв'язки</span>
+              <span>Зовнішні</span>
             </button>
           )}
 
@@ -243,7 +303,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Приховати другорядні DTO та Entity класи для спрощення графа"
+            title="Приховати другорядні DTO та Entity"
           >
             <Filter className="w-3.5 h-3.5" />
             <span>Без DTO</span>
@@ -256,93 +316,57 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
                 ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
                 : 'text-slate-400 hover:text-slate-200'
             }`}
-            title="Приховувати фонові зв'язки та показувати тільки активні стрілки вибраного класу"
+            title="Приховувати фонові лінії, показувати тільки активні стрілки вибраного елемента"
           >
             {onlyActiveEdges ? <EyeOff className="w-3.5 h-3.5 text-sky-400" /> : <Eye className="w-3.5 h-3.5" />}
-            <span>Чистий вигляд</span>
+            <span>{onlyActiveEdges ? 'Тільки активні' : 'Усі зв\'язки'}</span>
           </button>
         </div>
-
-        {/* Active Module Filter Chip */}
-        {selectedModules.length > 0 && onClearModuleFilter && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-mono shadow-md backdrop-blur-md animate-in fade-in">
-            <Box className="w-3 h-3 text-emerald-400" />
-            <span>Модулі: {selectedModules.length}</span>
-            <button
-              onClick={onClearModuleFilter}
-              className="p-0.5 hover:bg-emerald-500/30 rounded text-emerald-300 transition-colors ml-0.5"
-              title="Скинути фільтр модулів"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-        )}
-
-        {/* Active Package Filter Chip */}
-        {selectedPackages.length > 0 && onClearPackageFilter && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-purple-500/15 border border-purple-500/30 text-purple-300 text-xs font-mono shadow-md backdrop-blur-md animate-in fade-in">
-            <Folder className="w-3 h-3 text-purple-400" />
-            <span>Пакети: {selectedPackages.length}</span>
-            <button
-              onClick={onClearPackageFilter}
-              className="p-0.5 hover:bg-purple-500/30 rounded text-purple-300 transition-colors ml-0.5"
-              title="Скинути фільтр пакетів"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </div>
-        )}
       </div>
 
-      {/* Legend Pill */}
-      <div className="absolute bottom-4 left-4 z-10 hidden sm:flex items-center gap-3 px-3.5 py-2 rounded-full bg-[#161b22]/90 border border-[#30363d] backdrop-blur-md text-xs font-mono text-slate-300 shadow-2xl">
-        <div className="flex items-center gap-1.5">
-          <span className="w-2.5 h-2.5 rounded-full bg-sky-400 shadow-sm shadow-sky-400/50"></span>
-          <span>Вхідні (Хто використовує)</span>
-        </div>
-        <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shadow-sm shadow-amber-400/50"></span>
-          <span>Вихідні (Кого використовує)</span>
-        </div>
-        <div className="flex items-center gap-1.5 border-l border-white/10 pl-3">
-          <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shadow-sm shadow-rose-500/50"></span>
-          <span>Циклічні взаємні</span>
-        </div>
-      </div>
-
-      {/* Interactive React Flow Canvas */}
+      {/* Main React Flow Graph Viewport */}
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         onNodeClick={(_, node) => onSelectNode(node.id)}
+        onNodeDoubleClick={handleNodeDoubleClick}
         onPaneClick={onCanvasClick}
+        minZoom={0.05}
+        maxZoom={2.0}
+        defaultViewport={{ x: 80, y: 80, zoom: 0.75 }}
         fitView
-        minZoom={0.15}
-        maxZoom={2.5}
-        defaultEdgeOptions={{ type: 'customEdge' }}
+        fitViewOptions={{ padding: 0.2, maxZoom: 1.0 }}
+        attributionPosition="bottom-left"
+        className="w-full h-full"
       >
-        <Background
-          variant={BackgroundVariant.Dots}
-          gap={24}
-          size={1.5}
-          color="#21262d"
+        <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#30363d" />
+        <Controls
+          showInteractive={false}
+          className="!bg-[#161b22] !border-[#30363d] !rounded-xl !shadow-2xl overflow-hidden [&>button]:!bg-[#161b22] [&>button]:!border-[#30363d] [&>button]:!text-slate-300 [&>button:hover]:!bg-[#21262d]"
         />
-        <Controls />
         <MiniMap
-          nodeColor={(node: any) => {
-            const data = node.data;
-            if (data?.highlight_state === 'Selected') return '#38bdf8';
-            if (data?.highlight_state === 'InboundActive') return '#38bdf8';
-            if (data?.highlight_state === 'OutboundActive') return '#fb923c';
-            if (data?.highlight_state === 'MutualActive') return '#ef4444';
-            return '#30363d';
+          nodeColor={(n) => {
+            const data = n.data as any;
+            if (data.layer === 'UI') return '#38bdf8';
+            if (data.layer === 'Service') return '#fb923c';
+            if (data.layer === 'Infrastructure') return '#c084fc';
+            if (data.layer === 'Domain') return '#34d399';
+            return '#64748b';
           }}
           maskColor="rgba(13, 17, 23, 0.85)"
-          className="!bg-[#161b22] !border !border-[#30363d] !rounded-xl !overflow-hidden !shadow-2xl"
+          className="!bg-[#161b22] !border-[#30363d] !rounded-xl !shadow-2xl overflow-hidden"
         />
       </ReactFlow>
+
+      {/* Bottom Hint */}
+      <div className="absolute bottom-4 right-4 z-20 pointer-events-none">
+        <div className="px-3 py-1.5 rounded-lg bg-[#161b22]/90 border border-[#30363d] text-[11px] font-mono text-slate-400 shadow-xl backdrop-blur-md flex items-center gap-2">
+          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+          <span>💡 Подвійний клік на модулі/пакеті: розкрити дочірній рівень (Drill-Down)</span>
+        </div>
+      </div>
     </div>
   );
 };
