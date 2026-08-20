@@ -90,16 +90,16 @@ function calculateLayeredLayout(nodes: VisualGraphNode[], edges: VisualGraphEdge
     layerOrder.push({ key: 'Other', label: '5. UTILITIES & COMPONENTS', color: 'rgba(148, 163, 184, 0.05)' });
   }
 
-  const nodeWidth = 290;
-  const nodeHeight = 130;
-  const horizontalGap = 50;
-  const verticalGap = 40;
+  const nodeWidth = 280;
+  const nodeHeight = 120;
+  const horizontalGap = 80;
+  const verticalGap = 60;
   const maxColsPerRow = 4;
 
   const positionedNodes: PositionedNode[] = [];
   const swimlanes: SwimlaneInfo[] = [];
 
-  let currentY = 50;
+  let currentY = 60;
 
   for (const tier of layerOrder) {
     const tierNodes = ranks[tier.key];
@@ -109,11 +109,11 @@ function calculateLayeredLayout(nodes: VisualGraphNode[], edges: VisualGraphEdge
     tierNodes.sort((a, b) => b.degree_out - a.degree_out || a.label.localeCompare(b.label));
 
     const totalRows = Math.ceil(tierNodes.length / maxColsPerRow);
-    const laneHeight = totalRows * nodeHeight + (totalRows - 1) * verticalGap + 60;
+    const laneHeight = totalRows * nodeHeight + (totalRows - 1) * verticalGap + 80;
 
     swimlanes.push({
       label: tier.label,
-      y: currentY - 20,
+      y: currentY - 25,
       height: laneHeight,
       color: tier.color,
     });
@@ -123,11 +123,11 @@ function calculateLayeredLayout(nodes: VisualGraphNode[], edges: VisualGraphEdge
       const col = idx % maxColsPerRow;
 
       const x = 60 + col * (nodeWidth + horizontalGap);
-      const y = currentY + 30 + row * (nodeHeight + verticalGap);
+      const y = currentY + 35 + row * (nodeHeight + verticalGap);
       positionedNodes.push({ ...node, x, y });
     });
 
-    currentY += laneHeight + 60;
+    currentY += laneHeight + 90;
   }
 
   return { nodes: positionedNodes, swimlanes };
