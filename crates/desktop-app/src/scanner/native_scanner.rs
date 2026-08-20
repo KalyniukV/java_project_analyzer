@@ -442,22 +442,33 @@ impl NativeJavaScanner {
                 }
             }
 
-            // D. Referenced types in methods and signatures
-            for ref_type in &class_info.referenced_types {
-                let targets = self.resolve_type(ref_type, class_info, &classes_by_simple_name, &class_ids_set);
-                for target_id in targets {
-                    if target_id != class_info.id {
-                        let key = (class_info.id.clone(), target_id.clone(), RelationKind::MethodCall);
-                        if existing_rels.insert(key) {
-                            relationships.push(Relationship {
-                                id: format!("rel-{}", rel_id_counter),
-                                source: class_info.id.clone(),
-                                target: target_id,
-                                kind: RelationKind::MethodCall,
-                                description: Some("uses".to_string()),
-                                is_circular: false,
-                            });
-                            rel_id_counter += 1;
+            // D. Actual Method Calls extracted from method bodies
+            for method in &class_info.methods {
+                for called_ref in &method.called_methods {
+                    let called_cls_name = if called_ref.contains('#') {
+                        called_ref.split('#').next().unwrap_or("")
+                    } else {
+                        ""
+                    };
+
+                    if !called_cls_name.is_empty() {
+                        let targets = self.resolve_type(called_cls_name, class_info, &classes_by_simple_name, &class_ids_set);
+                        for target_id in targets {
+                            if target_id != class_info.id {
+                                let key = (class_info.id.clone(), target_id.clone(), RelationKind::MethodCall);
+                                if existing_rels.insert(key) {
+                                    let method_name = called_ref.split('#').nth(1).unwrap_or(called_ref);
+                                    relationships.push(Relationship {
+                                        id: format!("rel-{}", rel_id_counter),
+                                        source: class_info.id.clone(),
+                                        target: target_id,
+                                        kind: RelationKind::MethodCall,
+                                        description: Some(format!("calls {}", method_name)),
+                                        is_circular: false,
+                                    });
+                                    rel_id_counter += 1;
+                                }
+                            }
                         }
                     }
                 }
