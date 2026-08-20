@@ -1218,28 +1218,44 @@ impl NativeJavaScanner {
                 });
             }
 
-            // Extract referenced types (word matches in body, including GWT.create)
+            // Extract legitimate referenced types strictly from code (imports, fields, method signatures, GWT.create)
             let mut referenced_types = Vec::new();
-            let type_word_regex = Regex::new(r"\b([A-Z][a-zA-Z0-9_]+)\b").unwrap();
-            for w_cap in type_word_regex.captures_iter(&content) {
-                if let Some(w) = w_cap.get(1) {
-                    let word = w.as_str().to_string();
-                    if word != simple_name
-                        && !["String", "Integer", "Long", "Double", "Boolean", "List", "Map", "Set", "Optional", "Object", "Override", "Autowired", "Service", "Component", "Repository", "GWT", "AsyncCallback"].contains(&word.as_str())
-                        && !referenced_types.contains(&word)
-                    {
-                        referenced_types.push(word);
-                    }
+            let add_ref = |t: &str, refs: &mut Vec<String>| {
+                let clean = t.split('<').next().unwrap_or(t).trim_matches(|c: char| c == '[' || c == ']' || c.is_whitespace());
+                if !clean.is_empty()
+                    && clean != simple_name
+                    && !["void", "int", "long", "double", "float", "boolean", "byte", "char", "short",
+                         "String", "Integer", "Long", "Double", "Float", "Boolean", "Byte", "Character", "Short",
+                         "List", "Map", "Set", "Collection", "Optional", "Object", "Override", "Autowired",
+                         "Service", "Component", "Repository", "Controller", "GWT", "AsyncCallback"].contains(&clean)
+                    && !refs.contains(&clean.to_string())
+                {
+                    refs.push(clean.to_string());
+                }
+            };
+
+            // 1. All explicit imports in this file
+            for imp_fqcn in imports.values() {
+                add_ref(imp_fqcn, &mut referenced_types);
+            }
+
+            // 2. All field types
+            for f in &fields {
+                add_ref(&f.type_name, &mut referenced_types);
+            }
+
+            // 3. Method return types and parameters
+            for m in &methods {
+                add_ref(&m.return_type, &mut referenced_types);
+                for p in &m.parameters {
+                    add_ref(&p.type_name, &mut referenced_types);
                 }
             }
 
-            // Explicitly capture GWT.create(FooService.class)
+            // 4. Explicit GWT.create(FooService.class)
             for gwt_cap in self.gwt_create_regex.captures_iter(&content) {
                 if let Some(m) = gwt_cap.get(1) {
-                    let gwt_service_name = m.as_str().to_string();
-                    if !referenced_types.contains(&gwt_service_name) {
-                        referenced_types.push(gwt_service_name);
-                    }
+                    add_ref(m.as_str(), &mut referenced_types);
                 }
             }
 
@@ -1337,9 +1353,13 @@ impl NativeJavaScanner {
             return vec![same_pkg_fqcn];
         }
 
-        // 3. Direct lookup by simple name
-        if let Some(fqcns) = by_simple_name.get(clean_type) {
-            return fqcns.clone();
+        // 3. Explicit import matching: check if any imported FQCN ends with .clean_type
+        for ref_t in &current_class.referenced_types {
+            if ref_t == clean_type || ref_t.ends_with(&format!(".{}", clean_type)) || ref_t.ends_with(&format!("${}", clean_type)) {
+                if all_ids.contains(ref_t) {
+                    return vec![ref_t.clone()];
+                }
+            }
         }
 
         // 4. Nested / Inner class resolution (e.g. "Outer.Inner" or "com.pkg.Outer.Inner" or "Map.Entry")
@@ -1357,10 +1377,14 @@ impl NativeJavaScanner {
                 return vec![same_pkg_dollar];
             }
 
-            // If "Outer.Inner": check if Outer is a known class
+            let same_pkg_dot = format!("{}.{}", current_class.package_name, clean_type);
+            if all_ids.contains(&same_pkg_dot) {
+                return vec![same_pkg_dot];
+            }
+
+            // If "Outer.Inner": check if Outer is in by_simple_name
             let outer_name = parts[0];
             if let Some(outer_fqcns) = by_simple_name.get(outer_name) {
-                // If specific inner class exists in all_ids, return it, otherwise resolve to Outer class
                 let mut resolved = Vec::new();
                 for outer_fqcn in outer_fqcns {
                     let full_inner_dot = format!("{}.{}", outer_fqcn, parts[1..].join("."));
@@ -1369,7 +1393,7 @@ impl NativeJavaScanner {
                         resolved.push(full_inner_dot);
                     } else if all_ids.contains(&full_inner_dollar) {
                         resolved.push(full_inner_dollar);
-                    } else {
+                    } else if all_ids.contains(outer_fqcn) {
                         resolved.push(outer_fqcn.clone());
                     }
                 }
@@ -1397,9 +1421,19 @@ impl NativeJavaScanner {
                 }
             }
 
-            let sibling_inner = format!("{}.{}", outer_simple, clean_type);
-            if let Some(fqcns) = by_simple_name.get(&sibling_inner) {
-                return fqcns.clone();
+            let sibling_inner = format!("{}.{}.{}", current_class.package_name, outer_simple, clean_type);
+            if all_ids.contains(&sibling_inner) {
+                return vec![sibling_inner];
+            }
+        }
+
+        // 6. Direct lookup by simple name ONLY IF unique and referenced
+        if let Some(fqcns) = by_simple_name.get(clean_type) {
+            if fqcns.len() == 1 {
+                let target_fqcn = &fqcns[0];
+                if current_class.referenced_types.iter().any(|r| r == clean_type || r == target_fqcn) {
+                    return vec![target_fqcn.clone()];
+                }
             }
         }
 
