@@ -184,8 +184,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
     };
   }, [isResizingSidebar]);
 
-  if (!project) return null;
-
   const modulesList = useMemo(() => {
     if (!project) return [];
     const raw = project.modules.length > 0
@@ -199,6 +197,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return true;
     });
   }, [project, hasModuleFilter, selectedModules]);
+
+  if (!project) return null;
 
   return (
     <div

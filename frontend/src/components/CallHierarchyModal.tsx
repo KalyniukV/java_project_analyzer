@@ -233,6 +233,7 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
   const [hierarchy, setHierarchy] = useState<CallHierarchyGraph | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [activeTarget, setActiveTarget] = useState<string | null>(targetId);
+  const [isMaximized, setIsMaximized] = useState<boolean>(false);
 
   useEffect(() => {
     setActiveTarget(targetId);
@@ -343,8 +344,6 @@ export const CallHierarchyModal: React.FC<CallHierarchyModalProps> = ({
 
     return { rfNodes, rfEdges };
   }, [hierarchy, direction]);
-
-  const [isMaximized, setIsMaximized] = useState<boolean>(false);
 
   if (!isOpen || !activeTarget) return null;
 
