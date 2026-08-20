@@ -20,8 +20,8 @@ export interface LayoutResult {
 }
 
 /**
- * Calculates optimal (x, y) coordinates for nodes to minimize edge crossings,
- * eliminate visual clutter, and provide structured architectural clarity.
+ * Calculates optimal (x, y) coordinates for nodes with generous spacing
+ * to prevent edge intertwining, eliminate spaghetti lines, and provide clear visual paths.
  */
 export function calculateLayout(
   nodes: VisualGraphNode[],
@@ -52,10 +52,9 @@ export function calculateLayout(
 }
 
 /**
- * 1. ARCHITECTURAL LAYERED LAYOUT (Top-to-Bottom Flow)
- * UI (Controllers) -> Service (Business) -> Infrastructure (Repositories/Clients) -> Domain (Entities)
+ * 1. ARCHITECTURAL LAYERED LAYOUT (Top-to-Bottom Flow with Wide Channels)
  */
-function calculateLayeredLayout(nodes: VisualGraphNode[], edges: VisualGraphEdge[]): LayoutResult {
+function calculateLayeredLayout(nodes: VisualGraphNode[], _edges: VisualGraphEdge[]): LayoutResult {
   const ranks: { [key in 'UI' | 'Service' | 'Infrastructure' | 'Domain' | 'Other']: VisualGraphNode[] } = {
     UI: [],
     Service: [],
@@ -92,14 +91,14 @@ function calculateLayeredLayout(nodes: VisualGraphNode[], edges: VisualGraphEdge
 
   const nodeWidth = 280;
   const nodeHeight = 120;
-  const horizontalGap = 80;
-  const verticalGap = 60;
+  const horizontalGap = 160; // 160px channel between columns
+  const verticalGap = 130;   // 130px channel between rows
   const maxColsPerRow = 4;
 
   const positionedNodes: PositionedNode[] = [];
   const swimlanes: SwimlaneInfo[] = [];
 
-  let currentY = 60;
+  let currentY = 70;
 
   for (const tier of layerOrder) {
     const tierNodes = ranks[tier.key];
@@ -109,11 +108,11 @@ function calculateLayeredLayout(nodes: VisualGraphNode[], edges: VisualGraphEdge
     tierNodes.sort((a, b) => b.degree_out - a.degree_out || a.label.localeCompare(b.label));
 
     const totalRows = Math.ceil(tierNodes.length / maxColsPerRow);
-    const laneHeight = totalRows * nodeHeight + (totalRows - 1) * verticalGap + 80;
+    const laneHeight = totalRows * nodeHeight + (totalRows - 1) * verticalGap + 90;
 
     swimlanes.push({
       label: tier.label,
-      y: currentY - 25,
+      y: currentY - 30,
       height: laneHeight,
       color: tier.color,
     });
@@ -122,12 +121,12 @@ function calculateLayeredLayout(nodes: VisualGraphNode[], edges: VisualGraphEdge
       const row = Math.floor(idx / maxColsPerRow);
       const col = idx % maxColsPerRow;
 
-      const x = 60 + col * (nodeWidth + horizontalGap);
-      const y = currentY + 35 + row * (nodeHeight + verticalGap);
+      const x = 70 + col * (nodeWidth + horizontalGap);
+      const y = currentY + 40 + row * (nodeHeight + verticalGap);
       positionedNodes.push({ ...node, x, y });
     });
 
-    currentY += laneHeight + 90;
+    currentY += laneHeight + 110;
   }
 
   return { nodes: positionedNodes, swimlanes };
@@ -150,11 +149,13 @@ function calculatePackageClusteredLayout(nodes: VisualGraphNode[]): LayoutResult
   const positionedNodes: PositionedNode[] = [];
   const swimlanes: SwimlaneInfo[] = [];
 
-  const nodeWidth = 290;
-  const nodeHeight = 130;
+  const nodeWidth = 280;
+  const nodeHeight = 120;
+  const horizontalGap = 150;
+  const verticalGap = 120;
   const maxCols = 3;
 
-  let currentY = 50;
+  let currentY = 70;
 
   const sortedPkgs = Array.from(packageGroups.entries()).sort((a, b) => b[1].length - a[1].length);
 
@@ -162,11 +163,11 @@ function calculatePackageClusteredLayout(nodes: VisualGraphNode[]): LayoutResult
     pkgNodes.sort((a, b) => a.label.localeCompare(b.label));
 
     const totalRows = Math.ceil(pkgNodes.length / maxCols);
-    const laneHeight = totalRows * nodeHeight + (totalRows - 1) * 35 + 50;
+    const laneHeight = totalRows * nodeHeight + (totalRows - 1) * verticalGap + 80;
 
     swimlanes.push({
       label: `PACKAGE: ${pkgName} (${pkgNodes.length} classes)`,
-      y: currentY - 15,
+      y: currentY - 25,
       height: laneHeight,
       color: 'rgba(168, 85, 247, 0.05)',
     });
@@ -175,20 +176,20 @@ function calculatePackageClusteredLayout(nodes: VisualGraphNode[]): LayoutResult
       const row = Math.floor(idx / maxCols);
       const col = idx % maxCols;
 
-      const x = 60 + col * (nodeWidth + 45);
-      const y = currentY + 25 + row * (nodeHeight + 35);
+      const x = 70 + col * (nodeWidth + horizontalGap);
+      const y = currentY + 35 + row * (nodeHeight + verticalGap);
       positionedNodes.push({ ...node, x, y });
     });
 
-    currentY += laneHeight + 50;
+    currentY += laneHeight + 90;
   }
 
   return { nodes: positionedNodes, swimlanes };
 }
 
 /**
- * 3. FOCUS EGO-CENTERED LAYOUT
- * Target Node in center, Inbound callers on the Left, Outbound callees on the Right
+ * 3. FOCUS EGO-CENTERED LAYOUT (Clear 3-Column Split with 600px Channels)
+ * [INBOUND CALLERS] ======= 600px =======> [TARGET] ======= 600px =======> [OUTBOUND CALLEES]
  */
 function calculateFocusLayout(
   nodes: VisualGraphNode[],
@@ -232,54 +233,55 @@ function calculateFocusLayout(
   }
 
   const positionedNodes: PositionedNode[] = [];
-  const nodeWidth = 290;
-  const nodeHeight = 130;
-  const gapY = 30;
+  const nodeWidth = 280;
+  const nodeHeight = 120;
+  const gapY = 50;
 
-  // Selected Node at Center
-  const centerX = 500;
-  const centerY = Math.max(inNodes.length, outNodes.length) * (nodeHeight + gapY) / 2 + 50;
+  // Selected Node at Center Column (x = 650)
+  const centerX = 650;
+  const countMax = Math.max(inNodes.length, outNodes.length, 1);
+  const centerY = (countMax * (nodeHeight + gapY)) / 2 + 50;
   positionedNodes.push({ ...selectedNode, x: centerX, y: Math.max(centerY, 100) });
 
-  // Inbound Callers on Left (x = 80)
+  // Inbound Callers on Left Column (x = 80)
   inNodes.forEach((n, idx) => {
-    positionedNodes.push({ ...n, x: 80, y: 50 + idx * (nodeHeight + gapY) });
+    positionedNodes.push({ ...n, x: 80, y: 70 + idx * (nodeHeight + gapY) });
   });
 
-  // Outbound Callees on Right (x = 920)
+  // Outbound Callees on Right Column (x = 1220)
   outNodes.forEach((n, idx) => {
-    positionedNodes.push({ ...n, x: 920, y: 50 + idx * (nodeHeight + gapY) });
+    positionedNodes.push({ ...n, x: 1220, y: 70 + idx * (nodeHeight + gapY) });
   });
 
-  // Other unselected nodes placed below
-  let otherStartY = Math.max(centerY * 2, (inNodes.length + 1) * (nodeHeight + gapY)) + 100;
+  // Other unselected nodes placed far below
+  let otherStartY = Math.max(centerY * 2, (countMax + 1) * (nodeHeight + gapY)) + 140;
   otherNodes.forEach((n, idx) => {
     const col = idx % 4;
     const row = Math.floor(idx / 4);
-    positionedNodes.push({ ...n, x: 80 + col * (nodeWidth + 40), y: otherStartY + row * (nodeHeight + gapY) });
+    positionedNodes.push({ ...n, x: 80 + col * (nodeWidth + 140), y: otherStartY + row * (nodeHeight + 100) });
   });
 
   return { nodes: positionedNodes, swimlanes: [] };
 }
 
 /**
- * 4. CLEAN COMPACT GRID LAYOUT
+ * 4. CLEAN SPACIOUS GRID LAYOUT
  */
 function calculateGridLayout(nodes: VisualGraphNode[]): LayoutResult {
   const positionedNodes: PositionedNode[] = [];
   const cols = 4;
-  const nodeWidth = 290;
-  const nodeHeight = 130;
-  const gapX = 45;
-  const gapY = 40;
+  const nodeWidth = 280;
+  const nodeHeight = 120;
+  const gapX = 160;
+  const gapY = 130;
 
   nodes.forEach((node, idx) => {
     const col = idx % cols;
     const row = Math.floor(idx / cols);
     positionedNodes.push({
       ...node,
-      x: 60 + col * (nodeWidth + gapX),
-      y: 60 + row * (nodeHeight + gapY),
+      x: 80 + col * (nodeWidth + gapX),
+      y: 80 + row * (nodeHeight + gapY),
     });
   });
 
