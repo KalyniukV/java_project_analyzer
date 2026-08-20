@@ -343,6 +343,8 @@ export function App() {
               onSelectNode={handleSelectNode}
               onCanvasClick={handleCanvasClick}
               activeView={activeTab as any}
+              depth={depth}
+              isolateMode={isolateMode}
               selectedModules={selectedModules}
               selectedPackages={selectedPackages}
               onClearModuleFilter={handleClearModuleFilter}

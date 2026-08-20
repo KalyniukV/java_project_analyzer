@@ -35,6 +35,8 @@ interface GraphCanvasProps {
   onSelectNode: (nodeId: string) => void;
   onCanvasClick: () => void;
   activeView: 'modules' | 'packages' | 'classes';
+  depth?: number;
+  isolateMode?: boolean;
   selectedModules?: string[];
   selectedPackages?: string[];
   onClearModuleFilter?: () => void;
@@ -113,6 +115,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   onSelectNode,
   onCanvasClick,
   activeView,
+  depth = 1,
+  isolateMode = false,
   selectedModules = [],
   selectedPackages = [],
   includeExternal = false,
@@ -555,8 +559,21 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     }
   }, [filteredNodes, filteredEdges, activeView, runLayout, layoutMode]);
 
+  // Fit to screen helper
+  const handleFit = useCallback(() => {
+    if (cyRef.current) {
+      cyRef.current.animate({
+        fit: {
+          eles: cyRef.current.elements(':visible'),
+          padding: 50,
+        },
+        duration: 300,
+      });
+    }
+  }, []);
+
   // -------------------------------------------------------------
-  // 3. Pure Visual Selection Effect (ZERO RESHUFFLE, INSTANT STYLING)
+  // 3. Focus, Multi-hop Depth BFS, and Isolate Mode
   // -------------------------------------------------------------
   useEffect(() => {
     const cy = cyRef.current;
@@ -564,18 +581,54 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     cy.batch(() => {
       cy.elements().removeClass('selected inbound-edge outbound-edge neighbor-in neighbor-out dimmed');
+      cy.elements().style('display', 'element');
 
       if (selectedNodeId) {
         const selectedNode = cy.getElementById(selectedNodeId);
         if (selectedNode.length > 0) {
           selectedNode.addClass('selected');
 
-          const inEdges = selectedNode.incomers('edge');
-          const outEdges = selectedNode.outgoers('edge');
-          const inNodes = selectedNode.incomers('node');
-          const outNodes = selectedNode.outgoers('node');
+          // Multi-hop BFS according to depth prop
+          let inNodes = cy.collection();
+          let inEdges = cy.collection();
+          let currInFrontier = selectedNode;
 
-          if (onlyActiveEdges) {
+          for (let d = 0; d < depth; d++) {
+            const stepEdges = currInFrontier.incomers('edge');
+            const stepNodes = currInFrontier.incomers('node').difference(inNodes).difference(selectedNode);
+            inEdges = inEdges.union(stepEdges);
+            inNodes = inNodes.union(stepNodes);
+            currInFrontier = stepNodes;
+            if (currInFrontier.length === 0) break;
+          }
+
+          let outNodes = cy.collection();
+          let outEdges = cy.collection();
+          let currOutFrontier = selectedNode;
+
+          for (let d = 0; d < depth; d++) {
+            const stepEdges = currOutFrontier.outgoers('edge');
+            const stepNodes = currOutFrontier.outgoers('node').difference(outNodes).difference(selectedNode);
+            outEdges = outEdges.union(stepEdges);
+            outNodes = outNodes.union(stepNodes);
+            currOutFrontier = stepNodes;
+            if (currOutFrontier.length === 0) break;
+          }
+
+          const activeNodes = selectedNode.union(inNodes).union(outNodes);
+          const activeEdges = inEdges.union(outEdges);
+          const activeElements = activeNodes.union(activeEdges);
+
+          if (isolateMode) {
+            // In isolate mode, completely hide everything outside the neighborhood
+            const nonActiveElements = cy.elements().difference(activeElements);
+            nonActiveElements.style('display', 'none');
+
+            inNodes.addClass('neighbor-in');
+            outNodes.addClass('neighbor-out');
+            inEdges.addClass('inbound-edge');
+            outEdges.addClass('outbound-edge');
+          } else if (onlyActiveEdges) {
             cy.elements().addClass('dimmed');
             selectedNode.removeClass('dimmed');
 
@@ -592,7 +645,11 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         }
       }
     });
-  }, [selectedNodeId, onlyActiveEdges]);
+
+    if (isolateMode && selectedNodeId) {
+      handleFit();
+    }
+  }, [selectedNodeId, depth, isolateMode, onlyActiveEdges, handleFit]);
 
   // Switch layout mode explicitly
   const handleLayoutChange = (mode: 'dagre' | 'fcose' | 'grid' | 'concentric') => {
@@ -600,19 +657,6 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
     positionsCacheRef.current.clear();
     if (cyRef.current) {
       runLayout(cyRef.current, mode);
-    }
-  };
-
-  // Fit to screen
-  const handleFit = () => {
-    if (cyRef.current) {
-      cyRef.current.animate({
-        fit: {
-          eles: cyRef.current.elements(),
-          padding: 50,
-        },
-        duration: 300,
-      });
     }
   };
 
