@@ -163,6 +163,7 @@ mod tests {
             kind: RelationKind::FieldDependency,
             description: Some("@Autowired".to_string()),
             is_circular: false,
+            evidences: vec![],
         });
         model.relationships.push(Relationship {
             id: "rel-2".to_string(),
@@ -171,6 +172,7 @@ mod tests {
             kind: RelationKind::FieldDependency,
             description: Some("uses".to_string()),
             is_circular: false,
+            evidences: vec![],
         });
         // Intentionally add an Architecture Violation (UI -> Infrastructure direct bypass)
         model.relationships.push(Relationship {
@@ -180,6 +182,7 @@ mod tests {
             kind: RelationKind::FieldDependency,
             description: Some("direct dao bypass".to_string()),
             is_circular: false,
+            evidences: vec![],
         });
 
         model

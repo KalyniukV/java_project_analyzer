@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ProjectModel, VisualGraphPayload, ClassInfo } from '../../types';
+import { ProjectModel, VisualGraphPayload, ClassInfo, RelationshipEvidence } from '../../types';
 import { openFile, getClassDetail } from '../../api/client';
 import {
   FileCode,
@@ -56,6 +56,7 @@ function getDependencyDetails(
   targetId: string,
   edgeKind: string | undefined,
   edgeLabel: string | undefined,
+  edgeEvidences: RelationshipEvidence[] | undefined,
   project: ProjectModel | null,
   graphData: VisualGraphPayload | null
 ) {
@@ -69,12 +70,20 @@ function getDependencyDetails(
   const tgtSimple = tgtClass?.name || targetId.split('.').pop() || targetId;
 
   const causes: string[] = [];
+  const evidences: RelationshipEvidence[] = edgeEvidences ? [...edgeEvidences] : [];
 
   // 1. Check Fields in Source
   if (srcClass?.fields) {
     for (const f of srcClass.fields) {
       if (f.type_name === tgtSimple || f.type_name === targetId || f.type_name.includes(tgtSimple)) {
         causes.push(`Поле: ${f.is_injected ? '@Autowired ' : ''}${f.type_name} ${f.name}`);
+        if (!evidences.some((e) => e.detail.includes(f.name))) {
+          evidences.push({
+            file_path: srcClass.file_path,
+            line_number: undefined,
+            detail: `Поле ${f.is_injected ? '@Autowired ' : ''}${f.type_name} ${f.name}`,
+          });
+        }
       }
     }
   }
@@ -87,6 +96,13 @@ function getDependencyDetails(
       for (const call of calls) {
         const callMethodName = call.split('#').pop() || call;
         causes.push(`Метод: ${m.name}() ➔ ${callMethodName}()`);
+        if (!evidences.some((e) => e.detail.includes(m.name))) {
+          evidences.push({
+            file_path: srcClass.file_path,
+            line_number: m.line_number,
+            detail: `Виклик у методі ${m.name}() ➔ ${callMethodName}()`,
+          });
+        }
       }
     }
   }
@@ -94,9 +110,23 @@ function getDependencyDetails(
   // 3. Check Inheritance
   if (srcClass?.super_class === targetId || srcClass?.super_class === tgtSimple) {
     causes.push(`Наслідування: extends ${tgtSimple}`);
+    if (!evidences.some((e) => e.detail.includes('extends'))) {
+      evidences.push({
+        file_path: srcClass.file_path,
+        line_number: srcClass.line_number,
+        detail: `extends ${tgtSimple}`,
+      });
+    }
   }
   if (srcClass?.interfaces?.some((i) => i === targetId || i === tgtSimple)) {
     causes.push(`Інтерфейс: implements ${tgtSimple}`);
+    if (!evidences.some((e) => e.detail.includes('implements'))) {
+      evidences.push({
+        file_path: srcClass.file_path,
+        line_number: srcClass.line_number,
+        detail: `implements ${tgtSimple}`,
+      });
+    }
   }
 
   // Fallback to edge label if causes empty
@@ -114,6 +144,7 @@ function getDependencyDetails(
     srcSimple,
     tgtSimple,
     causes,
+    evidences,
     srcFilePath,
     srcLineNumber,
     tgtFilePath,
@@ -345,7 +376,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
               {inboundEdges.map((edge) => {
-                const details = getDependencyDetails(edge.source, edge.target, edge.kind, edge.label, project, graphData);
+                const details = getDependencyDetails(edge.source, edge.target, edge.kind, edge.label, edge.evidences, project, graphData);
                 const kindInfo = getRelationKindBadge(edge.kind, edge.label);
 
                 return (
@@ -382,8 +413,35 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                       </div>
                     )}
 
-                    {/* Causes List */}
-                    {details.causes.length > 0 && (
+                    {/* Detailed Evidence List */}
+                    {details.evidences.length > 0 ? (
+                      <div className="space-y-1 pt-1.5 border-t border-white/5">
+                        <span className="text-[9.5px] uppercase font-bold text-slate-400 tracking-wider block">
+                          Підстави зв'язку:
+                        </span>
+                        {details.evidences.slice(0, 5).map((ev, ei) => (
+                          <div
+                            key={ei}
+                            onClick={() => ev.file_path && handleOpenFile(ev.file_path, ev.line_number)}
+                            className={`p-1.5 rounded-lg bg-black/40 border border-white/5 flex flex-col gap-0.5 ${
+                              ev.file_path ? 'cursor-pointer hover:border-sky-500/50 transition-colors' : ''
+                            }`}
+                            title={ev.file_path ? `Відкрити ${ev.file_path}:${ev.line_number || 1}` : undefined}
+                          >
+                            <span className="text-[10.5px] font-mono text-sky-200 truncate">
+                              {ev.detail}
+                            </span>
+                            {ev.file_path && (
+                              <span className="text-[9px] font-mono text-sky-400/80 flex items-center gap-1 truncate">
+                                <FileCode className="w-2.5 h-2.5 flex-shrink-0" />
+                                {ev.file_path.split(/[/\\]/).slice(-2).join('/')}
+                                {ev.line_number ? `:${ev.line_number}` : ''}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : details.causes.length > 0 ? (
                       <div className="space-y-1 pt-1 border-t border-white/5">
                         {details.causes.map((cause, ci) => (
                           <div
@@ -395,7 +453,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                           </div>
                         ))}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 );
               })}
@@ -418,7 +476,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
               {outboundEdges.map((edge) => {
-                const details = getDependencyDetails(edge.source, edge.target, edge.kind, edge.label, project, graphData);
+                const details = getDependencyDetails(edge.source, edge.target, edge.kind, edge.label, edge.evidences, project, graphData);
                 const kindInfo = getRelationKindBadge(edge.kind, edge.label);
 
                 return (
@@ -455,8 +513,35 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                       </div>
                     )}
 
-                    {/* Causes List */}
-                    {details.causes.length > 0 && (
+                    {/* Detailed Evidence List */}
+                    {details.evidences.length > 0 ? (
+                      <div className="space-y-1 pt-1.5 border-t border-white/5">
+                        <span className="text-[9.5px] uppercase font-bold text-slate-400 tracking-wider block">
+                          Підстави зв'язку:
+                        </span>
+                        {details.evidences.slice(0, 5).map((ev, ei) => (
+                          <div
+                            key={ei}
+                            onClick={() => ev.file_path && handleOpenFile(ev.file_path, ev.line_number)}
+                            className={`p-1.5 rounded-lg bg-black/40 border border-white/5 flex flex-col gap-0.5 ${
+                              ev.file_path ? 'cursor-pointer hover:border-amber-500/50 transition-colors' : ''
+                            }`}
+                            title={ev.file_path ? `Відкрити ${ev.file_path}:${ev.line_number || 1}` : undefined}
+                          >
+                            <span className="text-[10.5px] font-mono text-amber-200 truncate">
+                              {ev.detail}
+                            </span>
+                            {ev.file_path && (
+                              <span className="text-[9px] font-mono text-amber-400/80 flex items-center gap-1 truncate">
+                                <FileCode className="w-2.5 h-2.5 flex-shrink-0" />
+                                {ev.file_path.split(/[/\\]/).slice(-2).join('/')}
+                                {ev.line_number ? `:${ev.line_number}` : ''}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : details.causes.length > 0 ? (
                       <div className="space-y-1 pt-1 border-t border-white/5">
                         {details.causes.map((cause, ci) => (
                           <div
@@ -468,7 +553,7 @@ export const InspectorPanel: React.FC<InspectorPanelProps> = ({
                           </div>
                         ))}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 );
               })}

@@ -124,6 +124,12 @@ export interface ModuleInfo {
   submodule_ids?: string[];
 }
 
+export interface RelationshipEvidence {
+  file_path: string;
+  line_number?: number;
+  detail: string;
+}
+
 export interface Relationship {
   id: string;
   source: string;
@@ -131,6 +137,7 @@ export interface Relationship {
   kind: RelationKind;
   description?: string;
   is_circular: boolean;
+  evidences?: RelationshipEvidence[];
 }
 
 export interface ProjectModel {
@@ -194,6 +201,7 @@ export interface VisualGraphEdge {
   highlight_state: EdgeHighlightState;
   is_circular: boolean;
   hop_depth?: number;
+  evidences?: RelationshipEvidence[];
 }
 
 export interface VisualGraphPayload {

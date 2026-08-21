@@ -288,6 +288,7 @@ impl GraphAnalyzer {
                                     if rel.is_circular {
                                         existing.is_circular = true;
                                     }
+                                    existing.evidences.extend(rel.evidences.clone());
                                 } else {
                                     edge_map.insert(key, VisualGraphEdge {
                                         id: rel.id.clone(),
@@ -298,6 +299,7 @@ impl GraphAnalyzer {
                                         highlight_state: EdgeHighlightState::Normal,
                                         is_circular: rel.is_circular,
                                         hop_depth: None,
+                                        evidences: rel.evidences.clone(),
                                     });
                                 }
                             }
@@ -401,6 +403,7 @@ impl GraphAnalyzer {
                                     if rel.is_circular {
                                         existing.is_circular = true;
                                     }
+                                    existing.evidences.extend(rel.evidences.clone());
                                 } else {
                                     edge_map.insert(key, VisualGraphEdge {
                                         id: rel.id.clone(),
@@ -411,6 +414,7 @@ impl GraphAnalyzer {
                                         highlight_state: EdgeHighlightState::Normal,
                                         is_circular: rel.is_circular,
                                         hop_depth: None,
+                                        evidences: rel.evidences.clone(),
                                     });
                                 }
                             }
@@ -535,6 +539,7 @@ impl GraphAnalyzer {
                                     if rel.kind == RelationKind::Extends || rel.kind == RelationKind::Implements || rel.kind == RelationKind::GwtRpcBinding {
                                         existing.kind = rel.kind.clone();
                                     }
+                                    existing.evidences.extend(rel.evidences.clone());
                                 } else {
                                     edge_map.insert(key, VisualGraphEdge {
                                         id: rel.id.clone(),
@@ -545,6 +550,7 @@ impl GraphAnalyzer {
                                         highlight_state: EdgeHighlightState::Normal,
                                         is_circular: rel.is_circular,
                                         hop_depth: None,
+                                        evidences: rel.evidences.clone(),
                                     });
                                 }
                             }

@@ -155,6 +155,13 @@ pub struct ModuleInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RelationshipEvidence {
+    pub file_path: String,
+    pub line_number: Option<u32>,
+    pub detail: String, // e.g. "pom.xml <dependency>", "@Autowired field", "method call"
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Relationship {
     pub id: String,
     pub source: String,
@@ -162,6 +169,8 @@ pub struct Relationship {
     pub kind: RelationKind,
     pub description: Option<String>,
     pub is_circular: bool,
+    #[serde(default)]
+    pub evidences: Vec<RelationshipEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -233,6 +242,8 @@ pub struct VisualGraphEdge {
     pub highlight_state: EdgeHighlightState,
     pub is_circular: bool,
     pub hop_depth: Option<u32>,
+    #[serde(default)]
+    pub evidences: Vec<RelationshipEvidence>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

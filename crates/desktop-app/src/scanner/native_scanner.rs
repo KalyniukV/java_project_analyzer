@@ -387,10 +387,15 @@ impl NativeJavaScanner {
                                 relationships.push(Relationship {
                                     id: format!("rel-{}", rel_id_counter),
                                     source: class_info.id.clone(),
-                                    target: target_id,
+                                    target: target_id.clone(),
                                     kind: RelationKind::Extends,
                                     description: Some(format!("extends {}", super_iface)),
                                     is_circular: false,
+                                    evidences: vec![RelationshipEvidence {
+                                        file_path: class_info.file_path.clone(),
+                                        line_number: Some(class_info.line_number),
+                                        detail: format!("extends {}", super_iface),
+                                    }],
                                 });
                                 rel_id_counter += 1;
                             }
@@ -411,10 +416,15 @@ impl NativeJavaScanner {
                             relationships.push(Relationship {
                                 id: format!("rel-{}", rel_id_counter),
                                 source: class_info.id.clone(),
-                                target: target_id,
+                                target: target_id.clone(),
                                 kind: RelationKind::Extends,
                                 description: Some(format!("extends {}", super_cls)),
                                 is_circular: false,
+                                evidences: vec![RelationshipEvidence {
+                                    file_path: class_info.file_path.clone(),
+                                    line_number: Some(class_info.line_number),
+                                    detail: format!("extends {}", super_cls),
+                                }],
                             });
                             rel_id_counter += 1;
                         }
@@ -432,10 +442,15 @@ impl NativeJavaScanner {
                             relationships.push(Relationship {
                                 id: format!("rel-{}", rel_id_counter),
                                 source: class_info.id.clone(),
-                                target: target_id,
+                                target: target_id.clone(),
                                 kind: RelationKind::Implements,
                                 description: Some(format!("implements {}", iface)),
                                 is_circular: false,
+                                evidences: vec![RelationshipEvidence {
+                                    file_path: class_info.file_path.clone(),
+                                    line_number: Some(class_info.line_number),
+                                    detail: format!("implements {}", iface),
+                                }],
                             });
                             rel_id_counter += 1;
                         }
@@ -458,10 +473,15 @@ impl NativeJavaScanner {
                             relationships.push(Relationship {
                                 id: format!("rel-{}", rel_id_counter),
                                 source: class_info.id.clone(),
-                                target: target_id,
+                                target: target_id.clone(),
                                 kind: RelationKind::FieldDependency,
-                                description: Some(desc),
+                                description: Some(desc.clone()),
                                 is_circular: false,
+                                evidences: vec![RelationshipEvidence {
+                                    file_path: class_info.file_path.clone(),
+                                    line_number: None,
+                                    detail: desc,
+                                }],
                             });
                             rel_id_counter += 1;
                         }
@@ -485,13 +505,19 @@ impl NativeJavaScanner {
                                 let key = (class_info.id.clone(), target_id.clone(), RelationKind::MethodCall);
                                 if existing_rels.insert(key) {
                                     let method_name = called_ref.split('#').nth(1).unwrap_or(called_ref);
+                                    let desc = format!("Виклик '#{}()' у методі '#{}()'", method_name, method.name);
                                     relationships.push(Relationship {
                                         id: format!("rel-{}", rel_id_counter),
                                         source: class_info.id.clone(),
                                         target: target_id,
                                         kind: RelationKind::MethodCall,
-                                        description: Some(format!("Виклик '#{}()' у методі '#{}()'", method_name, method.name)),
+                                        description: Some(desc.clone()),
                                         is_circular: false,
+                                        evidences: vec![RelationshipEvidence {
+                                            file_path: class_info.file_path.clone(),
+                                            line_number: Some(method.line_number),
+                                            detail: desc,
+                                        }],
                                     });
                                     rel_id_counter += 1;
                                 }
@@ -517,6 +543,11 @@ impl NativeJavaScanner {
                         kind: RelationKind::GwtRpcBinding,
                         description: Some(format!("GWT Async Contract [{}]", mapping.rpc_path)),
                         is_circular: false,
+                        evidences: vec![RelationshipEvidence {
+                            file_path: "".to_string(),
+                            line_number: None,
+                            detail: format!("GWT Асинхронний контракт [{}]", mapping.rpc_path),
+                        }],
                     });
                     rel_id_counter += 1;
                 }
@@ -533,12 +564,17 @@ impl NativeJavaScanner {
                         kind: RelationKind::GwtRpcBinding,
                         description: Some(format!("GWT RPC Bridge [{}]", mapping.rpc_path)),
                         is_circular: false,
+                        evidences: vec![RelationshipEvidence {
+                            file_path: "".to_string(),
+                            line_number: None,
+                            detail: format!("GWT RPC Сервлет міст [{}]", mapping.rpc_path),
+                        }],
                     });
                     rel_id_counter += 1;
                 }
             }
 
-            // 2. Find Client UI callers using this service and link them to ServiceAsync
+            // 3. Find Client UI callers using this service and link them to ServiceAsync
             let sync_simple = mapping.sync_interface.split('.').last().unwrap_or(&mapping.sync_interface);
             let async_simple = mapping.async_interface.as_deref().map(|s| s.split('.').last().unwrap_or(s));
 
@@ -580,6 +616,11 @@ impl NativeJavaScanner {
                             kind: RelationKind::FieldDependency,
                             description: Some("GWT Service Client".to_string()),
                             is_circular: false,
+                            evidences: vec![RelationshipEvidence {
+                                file_path: client_cls.file_path.clone(),
+                                line_number: Some(client_cls.line_number),
+                                detail: "Клієнтський виклик GWT сервісу".to_string(),
+                            }],
                         });
                         rel_id_counter += 1;
                     }
@@ -587,48 +628,69 @@ impl NativeJavaScanner {
             }
         }
 
-        // 6. Derive Package-level and Module-level relationships
+        // 6. Derive Package-level and Module-level relationships with evidences
         let class_to_pkg: HashMap<String, String> = model.classes.iter().map(|c| (c.id.clone(), c.package_name.clone())).collect();
         let class_to_mod: HashMap<String, String> = model.classes.iter().map(|c| (c.id.clone(), c.module_name.clone())).collect();
 
-        let mut pkg_rels: HashSet<(String, String)> = HashSet::new();
+        let mut pkg_rel_map: HashMap<(String, String), Vec<RelationshipEvidence>> = HashMap::new();
+        let mut mod_rel_map: HashMap<(String, String), Vec<RelationshipEvidence>> = HashMap::new();
         let mut mod_rels: HashSet<(String, String)> = HashSet::new();
-        let mut derived_rels = Vec::new();
 
         for rel in &relationships {
             if let (Some(src_pkg), Some(tgt_pkg)) = (class_to_pkg.get(&rel.source), class_to_pkg.get(&rel.target)) {
-                if src_pkg != tgt_pkg && pkg_rels.insert((src_pkg.clone(), tgt_pkg.clone())) {
-                    derived_rels.push(Relationship {
-                        id: format!("rel-pkg-{}", rel_id_counter),
-                        source: src_pkg.clone(),
-                        target: tgt_pkg.clone(),
-                        kind: RelationKind::PackageDependency,
-                        description: Some("package dependency".to_string()),
-                        is_circular: false,
-                    });
-                    rel_id_counter += 1;
+                if src_pkg != tgt_pkg {
+                    let key = (src_pkg.clone(), tgt_pkg.clone());
+                    pkg_rel_map.entry(key).or_default().extend(rel.evidences.clone());
                 }
             }
 
             if let (Some(src_mod), Some(tgt_mod)) = (class_to_mod.get(&rel.source), class_to_mod.get(&rel.target)) {
-                if !src_mod.is_empty() && !tgt_mod.is_empty() && src_mod != tgt_mod && mod_rels.insert((src_mod.clone(), tgt_mod.clone())) {
-                    derived_rels.push(Relationship {
-                        id: format!("rel-mod-{}", rel_id_counter),
-                        source: src_mod.clone(),
-                        target: tgt_mod.clone(),
-                        kind: RelationKind::ModuleDependency,
-                        description: Some("code dependency".to_string()),
-                        is_circular: false,
-                    });
-                    rel_id_counter += 1;
+                if !src_mod.is_empty() && !tgt_mod.is_empty() && src_mod != tgt_mod {
+                    let key = (src_mod.clone(), tgt_mod.clone());
+                    mod_rels.insert(key.clone());
+                    mod_rel_map.entry(key).or_default().extend(rel.evidences.clone());
                 }
             }
         }
 
+        let mut derived_rels = Vec::new();
+        for ((src_pkg, tgt_pkg), evs) in pkg_rel_map {
+            derived_rels.push(Relationship {
+                id: format!("rel-pkg-{}", rel_id_counter),
+                source: src_pkg,
+                target: tgt_pkg,
+                kind: RelationKind::PackageDependency,
+                description: Some("package dependency".to_string()),
+                is_circular: false,
+                evidences: evs,
+            });
+            rel_id_counter += 1;
+        }
+
+        for ((src_mod, tgt_mod), evs) in mod_rel_map {
+            derived_rels.push(Relationship {
+                id: format!("rel-mod-{}", rel_id_counter),
+                source: src_mod,
+                target: tgt_mod,
+                kind: RelationKind::ModuleDependency,
+                description: Some("code dependency".to_string()),
+                is_circular: false,
+                evidences: evs,
+            });
+            rel_id_counter += 1;
+        }
+
         // Add declared build-file module dependencies from pom.xml / build.gradle
         for m in &model.modules {
+            let build_file_path = if m.build_type == "maven" {
+                format!("{}/pom.xml", m.path)
+            } else {
+                format!("{}/build.gradle", m.path)
+            };
+
             for dep in &m.direct_dependencies {
-                if mod_rels.insert((m.id.clone(), dep.clone())) {
+                let key = (m.id.clone(), dep.clone());
+                if mod_rels.insert(key) {
                     derived_rels.push(Relationship {
                         id: format!("rel-mod-{}", rel_id_counter),
                         source: m.id.clone(),
@@ -636,6 +698,11 @@ impl NativeJavaScanner {
                         kind: RelationKind::ModuleDependency,
                         description: Some("declared in build file".to_string()),
                         is_circular: false,
+                        evidences: vec![RelationshipEvidence {
+                            file_path: build_file_path.clone(),
+                            line_number: None,
+                            detail: format!("Оголошено у файлі збірки: dependency '{}'", dep),
+                        }],
                     });
                     rel_id_counter += 1;
                 }
