@@ -502,79 +502,70 @@ impl NativeJavaScanner {
             }
         }
 
-        // E. GWT RPC Binding & Client-to-Server RPC Call Connections
+        // E. GWT RPC Binding & Client-to-Async-Interface Connections
         for mapping in &gwt_rpc_mappings {
-            // 1. Link Sync Interface <-> Server Implementation
+            let client_target_iface = mapping.async_interface.as_ref().unwrap_or(&mapping.sync_interface);
+
+            // 1. Link Client Interface (Async / Sync) <-> Server Implementation Servlet
             if let Some(ref srv) = mapping.server_servlet {
-                let sync_key = (mapping.sync_interface.clone(), srv.clone(), RelationKind::GwtRpcBinding);
-                if existing_rels.insert(sync_key) {
+                let binding_key = (client_target_iface.clone(), srv.clone(), RelationKind::GwtRpcBinding);
+                if existing_rels.insert(binding_key) {
                     relationships.push(Relationship {
                         id: format!("rel-gwt-rpc-{}", rel_id_counter),
-                        source: mapping.sync_interface.clone(),
+                        source: client_target_iface.clone(),
                         target: srv.clone(),
                         kind: RelationKind::GwtRpcBinding,
-                        description: Some(format!("GWT RPC Contract [{}]", mapping.rpc_path)),
+                        description: Some(format!("GWT RPC Bridge [{}]", mapping.rpc_path)),
                         is_circular: false,
                     });
                     rel_id_counter += 1;
                 }
+            }
 
-                // 2. Link Async Interface <-> Server Implementation
-                if let Some(ref async_iface) = mapping.async_interface {
-                    let async_key = (async_iface.clone(), srv.clone(), RelationKind::GwtRpcBinding);
-                    if existing_rels.insert(async_key) {
-                        relationships.push(Relationship {
-                            id: format!("rel-gwt-rpc-{}", rel_id_counter),
-                            source: async_iface.clone(),
-                            target: srv.clone(),
-                            kind: RelationKind::GwtRpcBinding,
-                            description: Some(format!("GWT RPC Bridge [{}]", mapping.rpc_path)),
-                            is_circular: false,
-                        });
-                        rel_id_counter += 1;
+            // 2. Find Client UI callers using this service and link them to ServiceAsync
+            let sync_simple = mapping.sync_interface.split('.').last().unwrap_or(&mapping.sync_interface);
+            let async_simple = mapping.async_interface.as_deref().map(|s| s.split('.').last().unwrap_or(s));
+
+            for client_cls in &model.classes {
+                if client_cls.id == mapping.sync_interface {
+                    continue;
+                }
+                if let Some(ref srv) = mapping.server_servlet {
+                    if client_cls.id == *srv {
+                        continue;
+                    }
+                }
+                if let Some(ref a_id) = mapping.async_interface {
+                    if client_cls.id == *a_id {
+                        continue;
                     }
                 }
 
-                // 3. Find Client UI callers using this service and link them to the server servlet
-                let sync_simple = mapping.sync_interface.split('.').last().unwrap_or(&mapping.sync_interface);
-                let async_simple = mapping.async_interface.as_deref().map(|s| s.split('.').last().unwrap_or(s));
+                // Check if client class references sync or async service
+                let has_field = client_cls.fields.iter().any(|f| {
+                    f.type_name == *sync_simple
+                        || f.type_name == mapping.sync_interface
+                        || async_simple.map(|a| f.type_name == a || f.type_name == mapping.async_interface.as_deref().unwrap_or("")).unwrap_or(false)
+                });
 
-                for client_cls in &model.classes {
-                    if client_cls.id == *srv || client_cls.id == mapping.sync_interface {
-                        continue;
-                    }
-                    if let Some(ref a_id) = mapping.async_interface {
-                        if client_cls.id == *a_id {
-                            continue;
-                        }
-                    }
+                let has_ref = client_cls.referenced_types.iter().any(|r| {
+                    r == sync_simple
+                        || r == &mapping.sync_interface
+                        || async_simple.map(|a| r == a || r == mapping.async_interface.as_deref().unwrap_or("")).unwrap_or(false)
+                });
 
-                    // Check if client class references sync or async service
-                    let has_field = client_cls.fields.iter().any(|f| {
-                        f.type_name == *sync_simple
-                            || f.type_name == mapping.sync_interface
-                            || async_simple.map(|a| f.type_name == a || f.type_name == mapping.async_interface.as_deref().unwrap_or("")).unwrap_or(false)
-                    });
-
-                    let has_ref = client_cls.referenced_types.iter().any(|r| {
-                        r == sync_simple
-                            || r == &mapping.sync_interface
-                            || async_simple.map(|a| r == a || r == mapping.async_interface.as_deref().unwrap_or("")).unwrap_or(false)
-                    });
-
-                    if has_field || has_ref {
-                        let rpc_call_key = (client_cls.id.clone(), srv.clone(), RelationKind::GwtRpcCall);
-                        if existing_rels.insert(rpc_call_key) {
-                            relationships.push(Relationship {
-                                id: format!("rel-gwt-call-{}", rel_id_counter),
-                                source: client_cls.id.clone(),
-                                target: srv.clone(),
-                                kind: RelationKind::GwtRpcCall,
-                                description: Some(format!("GWT RPC [{}]", mapping.rpc_path)),
-                                is_circular: false,
-                            });
-                            rel_id_counter += 1;
-                        }
+                if has_field || has_ref {
+                    let client_rel_key = (client_cls.id.clone(), client_target_iface.clone(), RelationKind::FieldDependency);
+                    if existing_rels.insert(client_rel_key) {
+                        relationships.push(Relationship {
+                            id: format!("rel-gwt-client-{}", rel_id_counter),
+                            source: client_cls.id.clone(),
+                            target: client_target_iface.clone(),
+                            kind: RelationKind::FieldDependency,
+                            description: Some("GWT Service Client".to_string()),
+                            is_circular: false,
+                        });
+                        rel_id_counter += 1;
                     }
                 }
             }
@@ -1773,15 +1764,14 @@ mod tests {
         assert_eq!(servlet.layer, ArchitectureLayer::Infrastructure);
         assert!(servlet.annotations.iter().any(|a| a.contains("GWT:RemoteServiceServlet")));
 
-        // Verify GWT RPC Bridge & Call Relationships
-        let rpc_call = model.relationships.iter().find(|r| r.kind == RelationKind::GwtRpcCall);
-        assert!(rpc_call.is_some(), "GWT RPC Call relationship from Presenter to Servlet should be detected!");
-        let rpc = rpc_call.unwrap();
-        assert_eq!(rpc.source, "com.example.gwtapp.client.presenter.GreetingPresenter");
-        assert_eq!(rpc.target, "com.example.gwtapp.server.GreetingServiceImpl");
+        // Verify GWT RPC Bridge & Client Call Relationships
+        let client_call = model.relationships.iter().find(|r| r.source.contains("GreetingPresenter") && r.target.contains("GreetingServiceAsync"));
+        assert!(client_call.is_some(), "Client Presenter should connect directly to GreetingServiceAsync interface!");
 
         let rpc_binding = model.relationships.iter().find(|r| r.kind == RelationKind::GwtRpcBinding && r.source.contains("GreetingServiceAsync"));
         assert!(rpc_binding.is_some(), "GWT RPC Bridge relationship from Async interface to Servlet should be detected!");
+        let binding = rpc_binding.unwrap();
+        assert_eq!(binding.target, "com.example.gwtapp.server.GreetingServiceImpl");
 
         // Verify detailed parameters on methods
         let presenter = model.classes.iter().find(|c| c.name == "GreetingPresenter").unwrap();
