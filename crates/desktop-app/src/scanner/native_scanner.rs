@@ -10,6 +10,20 @@ use std::time::Instant;
 use rayon::prelude::*;
 use walkdir::WalkDir;
 
+const JDK_COMMON_TYPES: &[&str] = &[
+    "String", "Object", "Integer", "Long", "Double", "Float", "Boolean", "Byte", "Short", "Character",
+    "Void", "void", "int", "long", "double", "float", "boolean", "byte", "short", "char",
+    "List", "Map", "Set", "Collection", "Iterable", "Iterator", "Optional", "Future", "CompletableFuture",
+    "Stream", "Arrays", "Collections", "Objects", "System", "Math", "Class", "Exception", "Throwable",
+    "RuntimeException", "IllegalArgumentException", "IllegalStateException", "NullPointerException",
+    "Override", "Deprecated", "SuppressWarnings", "FunctionalInterface", "AutoCloseable", "Closeable",
+    "Serializable", "Cloneable", "Comparable", "Comparator", "Enum", "Thread", "Runnable", "Callable",
+    "StringBuilder", "StringBuffer", "CharSequence", "Number", "BigInteger", "BigDecimal",
+    "Date", "LocalDate", "LocalDateTime", "LocalTime", "Instant", "Duration", "Period",
+    "UUID", "URI", "URL", "Path", "File", "InputStream", "OutputStream", "Reader", "Writer",
+    "Logger", "LoggerFactory", "Log", "LogFactory",
+];
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Default)]
 pub struct GwtModuleInfo {
@@ -989,12 +1003,37 @@ impl NativeJavaScanner {
 
         // Parse inter-module dependencies from pom.xml, build.gradle, and build.gradle.kts
         let known_mod_map: HashMap<String, String> = found_modules.iter().map(|m| (m.name.clone(), m.id.clone())).collect();
-        let known_mod_dirs: HashMap<String, String> = found_modules.iter().filter_map(|m| {
-            Path::new(&m.path).file_name().and_then(|n| n.to_str()).map(|dir| (dir.to_string(), m.id.clone()))
-        }).collect();
 
-        let pom_dep_regex = Regex::new(r"(?s)<dependency>.*?<artifactId>([^<]+)</artifactId>.*?</dependency>").unwrap();
+        let pom_dep_regex = Regex::new(r"(?s)<dependency>(?:.*?<groupId>([^<]+)</groupId>)?.*?<artifactId>([^<]+)</artifactId>.*?</dependency>").unwrap();
         let gradle_dep_regex = Regex::new(r#"project\s*\(\s*(?:path\s*:\s*)?['":]+([^'"]+)['"]\s*\)"#).unwrap();
+
+        let is_external_library_group = |grp: &str| -> bool {
+            let g = grp.trim();
+            g.starts_with("org.spring")
+                || g.starts_with("org.apache")
+                || g.starts_with("com.google")
+                || g.starts_with("junit")
+                || g.starts_with("org.junit")
+                || g.starts_with("org.mockito")
+                || g.starts_with("com.fasterxml")
+                || g.starts_with("org.hibernate")
+                || g.starts_with("org.slf4j")
+                || g.starts_with("ch.qos")
+                || g.starts_with("javax")
+                || g.starts_with("jakarta")
+                || g.starts_with("io.netty")
+                || g.starts_with("io.micrometer")
+                || g.starts_with("org.projectlombok")
+                || g.starts_with("com.h2database")
+                || g.starts_with("mysql")
+                || g.starts_with("org.postgresql")
+                || g.starts_with("org.mongodb")
+                || g.starts_with("net.bytebuddy")
+                || g.starts_with("org.assertj")
+                || g.starts_with("io.swagger")
+                || g.starts_with("com.zaxxer")
+                || g.starts_with("org.mapstruct")
+        };
 
         for m in &mut found_modules {
             let mod_dir = Path::new(&m.path);
@@ -1007,9 +1046,14 @@ impl NativeJavaScanner {
             if pom_file.exists() {
                 if let Ok(content) = fs::read_to_string(&pom_file) {
                     for cap in pom_dep_regex.captures_iter(&content) {
-                        if let Some(art_match) = cap.get(1) {
+                        let group_id = cap.get(1).map(|g| g.as_str().trim()).unwrap_or("");
+                        if !group_id.is_empty() && is_external_library_group(group_id) {
+                            continue;
+                        }
+
+                        if let Some(art_match) = cap.get(2) {
                             let art_id = art_match.as_str().trim();
-                            if let Some(target_id) = known_mod_map.get(art_id).or_else(|| known_mod_dirs.get(art_id)) {
+                            if let Some(target_id) = known_mod_map.get(art_id) {
                                 if target_id != &m.id {
                                     deps.insert(target_id.clone());
                                 }
@@ -1036,7 +1080,6 @@ impl NativeJavaScanner {
                             let last_part = raw_name.split(':').last().unwrap_or(raw_name);
                             if let Some(target_id) = known_mod_map.get(raw_name)
                                 .or_else(|| known_mod_map.get(&mod_name))
-                                .or_else(|| known_mod_dirs.get(last_part))
                                 .or_else(|| known_mod_map.get(last_part))
                             {
                                 if target_id != &m.id {
@@ -1549,7 +1592,8 @@ impl NativeJavaScanner {
                                 if !called_methods.contains(&target_call) {
                                     called_methods.push(target_call);
                                 }
-                            } else {
+                            } else if rec.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+                                // Only static class invocations (e.g. StringUtils.hasText, Math.max, OrderConstants.VAL)
                                 let target_call = format!("{}#{}", rec, called_name);
                                 if !called_methods.contains(&target_call) {
                                     called_methods.push(target_call);
@@ -1717,6 +1761,16 @@ impl NativeJavaScanner {
     ) -> Vec<String> {
         let clean_type = type_name.split('<').next().unwrap_or(type_name).trim();
 
+        if clean_type.is_empty() || JDK_COMMON_TYPES.contains(&clean_type) {
+            return Vec::new();
+        }
+
+        // If clean_type is lowercase with no package dots (e.g. "order", "resp", "item", "user", "dto", "client"):
+        // It's a local variable name or primitive keyword, NOT a class!
+        if !clean_type.contains('.') && clean_type.chars().next().map(|c| c.is_lowercase()).unwrap_or(false) {
+            return Vec::new();
+        }
+
         // 1. If it's already an FQCN
         if all_ids.contains(clean_type) {
             return vec![clean_type.to_string()];
@@ -1802,11 +1856,12 @@ impl NativeJavaScanner {
             }
         }
 
-        // 6. Direct lookup by simple name ONLY IF unique and referenced
+        // 6. Direct lookup by simple name ONLY IF unique AND explicitly imported or referenced by full name
         if let Some(fqcns) = by_simple_name.get(clean_type) {
             if fqcns.len() == 1 {
                 let target_fqcn = &fqcns[0];
-                if current_class.referenced_types.iter().any(|r| r == clean_type || r == target_fqcn) {
+                let is_explicit = current_class.referenced_types.iter().any(|r| r == clean_type || r == target_fqcn);
+                if is_explicit {
                     return vec![target_fqcn.clone()];
                 }
             }
