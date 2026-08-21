@@ -506,13 +506,29 @@ impl NativeJavaScanner {
         for mapping in &gwt_rpc_mappings {
             let client_target_iface = mapping.async_interface.as_ref().unwrap_or(&mapping.sync_interface);
 
-            // 1. Link Client Interface (Async / Sync) <-> Server Implementation Servlet
+            // 1. Link Async Interface -> Sync RemoteService Interface (GwtRpcBinding)
+            if let Some(ref async_iface) = mapping.async_interface {
+                let async_sync_key = (async_iface.clone(), mapping.sync_interface.clone(), RelationKind::GwtRpcBinding);
+                if existing_rels.insert(async_sync_key) {
+                    relationships.push(Relationship {
+                        id: format!("rel-gwt-async-sync-{}", rel_id_counter),
+                        source: async_iface.clone(),
+                        target: mapping.sync_interface.clone(),
+                        kind: RelationKind::GwtRpcBinding,
+                        description: Some(format!("GWT Async Contract [{}]", mapping.rpc_path)),
+                        is_circular: false,
+                    });
+                    rel_id_counter += 1;
+                }
+            }
+
+            // 2. Link Sync Interface -> Server Implementation Servlet (GwtRpcBinding)
             if let Some(ref srv) = mapping.server_servlet {
-                let binding_key = (client_target_iface.clone(), srv.clone(), RelationKind::GwtRpcBinding);
-                if existing_rels.insert(binding_key) {
+                let rpc_bridge_key = (mapping.sync_interface.clone(), srv.clone(), RelationKind::GwtRpcBinding);
+                if existing_rels.insert(rpc_bridge_key) {
                     relationships.push(Relationship {
                         id: format!("rel-gwt-rpc-{}", rel_id_counter),
-                        source: client_target_iface.clone(),
+                        source: mapping.sync_interface.clone(),
                         target: srv.clone(),
                         kind: RelationKind::GwtRpcBinding,
                         description: Some(format!("GWT RPC Bridge [{}]", mapping.rpc_path)),
@@ -1764,14 +1780,15 @@ mod tests {
         assert_eq!(servlet.layer, ArchitectureLayer::Infrastructure);
         assert!(servlet.annotations.iter().any(|a| a.contains("GWT:RemoteServiceServlet")));
 
-        // Verify GWT RPC Bridge & Client Call Relationships
+        // Verify Complete 4-Step GWT RPC Chain
         let client_call = model.relationships.iter().find(|r| r.source.contains("GreetingPresenter") && r.target.contains("GreetingServiceAsync"));
         assert!(client_call.is_some(), "Client Presenter should connect directly to GreetingServiceAsync interface!");
 
-        let rpc_binding = model.relationships.iter().find(|r| r.kind == RelationKind::GwtRpcBinding && r.source.contains("GreetingServiceAsync"));
-        assert!(rpc_binding.is_some(), "GWT RPC Bridge relationship from Async interface to Servlet should be detected!");
-        let binding = rpc_binding.unwrap();
-        assert_eq!(binding.target, "com.example.gwtapp.server.GreetingServiceImpl");
+        let async_to_sync = model.relationships.iter().find(|r| r.source.contains("GreetingServiceAsync") && r.target.contains("GreetingService") && !r.target.contains("GreetingServiceImpl"));
+        assert!(async_to_sync.is_some(), "GreetingServiceAsync should link to GreetingService (Sync Interface)!");
+
+        let sync_to_servlet = model.relationships.iter().find(|r| r.source.contains("GreetingService") && !r.source.contains("GreetingServiceAsync") && r.target.contains("GreetingServiceImpl") && r.kind == RelationKind::GwtRpcBinding);
+        assert!(sync_to_servlet.is_some(), "GreetingService (Sync Interface) should link to GreetingServiceImpl (Server Servlet) via GwtRpcBinding!");
 
         // Verify detailed parameters on methods
         let presenter = model.classes.iter().find(|c| c.name == "GreetingPresenter").unwrap();
