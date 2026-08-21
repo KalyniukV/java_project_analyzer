@@ -26,6 +26,8 @@ mod tests {
             afferent_coupling: 0,
             efferent_coupling: 0,
             instability: 0.0,
+            parent_module_id: None,
+            submodule_ids: vec![],
         });
         model.modules.push(ModuleInfo {
             id: "api-service".to_string(),
@@ -37,6 +39,8 @@ mod tests {
             afferent_coupling: 0,
             efferent_coupling: 0,
             instability: 0.0,
+            parent_module_id: None,
+            submodule_ids: vec![],
         });
 
         // 2 Packages

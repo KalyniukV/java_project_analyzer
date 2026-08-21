@@ -174,6 +174,8 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
   // -------------------------------------------------------------
   const runLayout = useCallback((cy: Core, mode: string) => {
     let layoutOptions: any;
+    const nodeCount = cy.nodes().length;
+    const isLarge = nodeCount > 60;
 
     if (mode === 'dagre') {
       layoutOptions = {
@@ -182,18 +184,18 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         nodeSep: 70,
         rankSep: 90,
         edgeSep: 35,
-        animate: true,
-        animationDuration: 300,
+        animate: !isLarge,
+        animationDuration: 250,
         fit: true,
         padding: 50,
       };
     } else if (mode === 'fcose') {
       layoutOptions = {
         name: 'fcose',
-        quality: 'proof',
+        quality: isLarge ? 'default' : 'proof',
         randomize: false,
-        animate: true,
-        animationDuration: 300,
+        animate: !isLarge,
+        animationDuration: 250,
         fit: true,
         padding: 50,
         nodeSeparation: 90,
@@ -204,16 +206,16 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         name: 'grid',
         fit: true,
         padding: 50,
-        animate: true,
-        animationDuration: 300,
+        animate: !isLarge,
+        animationDuration: 250,
       };
     } else {
       layoutOptions = {
         name: 'concentric',
         fit: true,
         padding: 50,
-        animate: true,
-        animationDuration: 300,
+        animate: !isLarge,
+        animationDuration: 250,
       };
     }
 
@@ -240,6 +242,10 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
       minZoom: 0.08,
       maxZoom: 4.0,
       wheelSensitivity: 0.25,
+      hideEdgesOnViewport: true,
+      textureOnViewport: true,
+      motionBlur: false,
+      pixelRatio: 'auto',
       style: [
         // BASE NODE STYLING (ReactFlow Pixel-Perfect Card)
         {

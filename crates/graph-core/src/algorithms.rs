@@ -243,7 +243,12 @@ impl GraphAnalyzer {
                     if is_core || is_ext {
                         let pkg_count = self.model.packages.iter().filter(|p| p.module_name == m.name || p.module_name == m.id).count();
                         let class_count = self.model.classes.iter().filter(|c| c.module_name == m.name || c.module_name == m.id).count();
-                        let sub_label_str = if pkg_count > 0 || class_count > 0 {
+                        
+                        let sub_label_str = if m.parent_module_id.is_some() {
+                            format!("підмодуль • {} classes", class_count)
+                        } else if !m.submodule_ids.is_empty() {
+                            format!("{} підмодулів • {} classes", m.submodule_ids.len(), class_count)
+                        } else if pkg_count > 0 || class_count > 0 {
                             format!("{} pkgs • {} classes", pkg_count, class_count)
                         } else if !m.exported_packages.is_empty() {
                             format!("{} pkgs", m.exported_packages.len())
@@ -257,7 +262,7 @@ impl GraphAnalyzer {
                             sub_label: Some(sub_label_str),
                             category: "module".to_string(),
                             layer: None,
-                            group: None,
+                            group: m.parent_module_id.clone(),
                             highlight_state: NodeHighlightState::Normal,
                             degree_in: m.afferent_coupling,
                             degree_out: m.efferent_coupling,
@@ -317,11 +322,15 @@ impl GraphAnalyzer {
                     }
                 }
 
-                // Smart limit for massive 100k+ projects when no filter or node is selected
-                if core_ids.len() > 250 && selected_id.is_none() && !has_filter {
+                // High-Performance limit for massive projects (100k+ LOC, hundreds of packages)
+                if core_ids.len() > 100 && selected_id.is_none() && !has_filter {
                     let mut sorted_packages: Vec<&PackageInfo> = self.model.packages.iter().collect();
-                    sorted_packages.sort_by(|a, b| b.class_ids.len().cmp(&a.class_ids.len()));
-                    core_ids = sorted_packages.into_iter().take(200).map(|p| p.id.clone()).collect();
+                    sorted_packages.sort_by(|a, b| {
+                        let score_a = a.class_ids.len() * 10 + a.metrics.as_ref().map(|m| m.afferent_coupling + m.efferent_coupling).unwrap_or(0);
+                        let score_b = b.class_ids.len() * 10 + b.metrics.as_ref().map(|m| m.afferent_coupling + m.efferent_coupling).unwrap_or(0);
+                        score_b.cmp(&score_a)
+                    });
+                    core_ids = sorted_packages.into_iter().take(80).map(|p| p.id.clone()).collect();
                 }
 
                 // If include_external, find neighbor packages that connect with core_ids up to depth hops

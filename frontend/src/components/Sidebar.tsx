@@ -398,7 +398,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         ) : (
           /* =========================================================
-             STANDARD HIERARCHICAL TREE (Module ➔ Package ➔ Class)
+             STANDARD HIERARCHICAL TREE (Module ➔ Submodule ➔ Package ➔ Class)
              ========================================================= */
           <div className="space-y-1">
             <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 px-2 py-1 flex items-center justify-between">
@@ -408,140 +408,158 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </span>
             </div>
 
-            {modulesList.map((m) => {
-              const isModExpanded = expandedMods[m.id] ?? (modulesList.length <= 2);
-              const modPackages = packagesByModMap.get(m.id) || [];
-              const isModSelected = selectedModules.includes(m.id);
-
-              return (
-                <div key={m.id} className="space-y-0.5">
-                  {/* Module Header */}
-                  <div
-                    className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-mono transition-colors group ${
-                      isModSelected
-                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-                        : selectedNodeId === m.id
-                        ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
-                        : 'text-slate-200 hover:bg-white/5'
-                    }`}
-                  >
-                    <button onClick={() => toggleMod(m.id)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
-                      {isModExpanded ? (
-                        <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                      ) : (
-                        <ChevronRight className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
-                      )}
-                      <Box className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
-                      <span className="truncate flex-1 font-bold text-[11px]" title={m.name}>
-                        {m.name}
-                      </span>
-                    </button>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => {
-                          onSelectOnlyModule(m.id);
-                          if (onDrillDown) onDrillDown(m.id, 'packages');
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-1 hover:bg-emerald-500/20 rounded text-emerald-400 transition-opacity"
-                        title="Фокусувати цей модуль на графі"
-                      >
-                        <Target className="w-3 h-3" />
-                      </button>
-                      <span className="text-[9px] text-slate-400 px-1 rounded bg-black/40">
-                        {modPackages.length}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Packages in Module */}
-                  {isModExpanded && (
-                    <div className="pl-3 space-y-0.5 border-l border-emerald-500/10 ml-3.5">
-                      {modPackages.map((pkg) => {
-                        const isPkgExpanded = expandedPkgs[pkg.id] ?? false;
-                        const isPkgSelected = selectedPackages.includes(pkg.id);
-                        const shortPkgName = pkg.name.split('.').slice(-2).join('.');
-
-                        return (
-                          <div key={pkg.id} className="space-y-0.5">
-                            <div
-                              className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-mono transition-colors group ${
-                                isPkgSelected
-                                  ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
-                                  : selectedNodeId === pkg.id
-                                  ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
-                                  : 'text-slate-300 hover:bg-white/5'
-                              }`}
-                            >
-                              <button onClick={() => togglePkg(pkg.id)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
-                                {isPkgExpanded ? (
-                                  <ChevronDown className="w-3 h-3 text-slate-400 flex-shrink-0" />
-                                ) : (
-                                  <ChevronRight className="w-3 h-3 text-slate-400 flex-shrink-0" />
-                                )}
-                                {isPkgExpanded ? (
-                                  <FolderOpen className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                                ) : (
-                                  <Folder className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
-                                )}
-                                <span className="truncate flex-1 text-[11px]" title={pkg.name}>
-                                  {shortPkgName}
-                                </span>
-                              </button>
-
-                              <div className="flex items-center gap-1">
-                                <button
-                                  onClick={() => {
-                                    onSelectOnlyPackage(pkg.id);
-                                    if (onDrillDown) onDrillDown(pkg.id, 'classes');
-                                  }}
-                                  className="opacity-0 group-hover:opacity-100 p-1 hover:bg-purple-500/20 rounded text-purple-400 transition-opacity"
-                                  title="Ізолювати класи цього пакета на графі"
-                                >
-                                  <Target className="w-3 h-3" />
-                                </button>
-                                <span className="text-[9px] text-slate-400 px-1 rounded bg-black/40">
-                                  {pkg.class_ids.length}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Classes inside this Package */}
-                            {isPkgExpanded && (
-                              <div className="pl-3 space-y-0.5 border-l border-purple-500/10 ml-3.5">
-                                {(classesByPkgMap.get(pkg.name) || []).map((cls) => {
-                                  const isSelected = selectedNodeId === cls.id;
-                                  return (
-                                    <button
-                                      key={cls.id}
-                                      onClick={() => onSelectNode(cls.id)}
-                                      className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-mono transition-all text-left truncate ${
-                                        isSelected
-                                          ? 'bg-sky-500/30 text-sky-200 border border-sky-500/60 font-bold shadow-md'
-                                          : 'text-slate-300 hover:bg-white/5 hover:text-white'
-                                      }`}
-                                      title={cls.id}
-                                    >
-                                      <FileCode className={`w-3 h-3 flex-shrink-0 ${isSelected ? 'text-sky-400' : 'text-slate-400'}`} />
-                                      <span className="truncate">{cls.name}</span>
-                                      {cls.annotations.length > 0 && (
-                                        <span className="text-[8px] text-amber-400 ml-auto flex-shrink-0">
-                                          @{cls.annotations[0]}
-                                        </span>
-                                      )}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+            {(() => {
+              const rootModules = modulesList.filter(
+                (m) => !m.parent_module_id || !modulesList.some((other) => other.id === m.parent_module_id)
               );
-            })}
+
+              const renderModule = (m: ModuleInfo, depth = 0): React.ReactNode => {
+                const isModExpanded = expandedMods[m.id] ?? (depth === 0 && modulesList.length <= 3);
+                const modPackages = packagesByModMap.get(m.id) || [];
+                const isModSelected = selectedModules.includes(m.id);
+                const submodules = modulesList.filter((sub) => sub.parent_module_id === m.id && sub.id !== m.id);
+
+                return (
+                  <div key={m.id} className="space-y-0.5" style={{ paddingLeft: depth > 0 ? `${depth * 8}px` : undefined }}>
+                    {/* Module Header */}
+                    <div
+                      className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-xs font-mono transition-colors group ${
+                        isModSelected
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                          : selectedNodeId === m.id
+                          ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+                          : 'text-slate-200 hover:bg-white/5'
+                      }`}
+                    >
+                      <button onClick={() => toggleMod(m.id)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
+                        {isModExpanded ? (
+                          <ChevronDown className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                        )}
+                        <Box className={`w-3.5 h-3.5 flex-shrink-0 ${depth > 0 ? 'text-teal-400' : 'text-emerald-400'}`} />
+                        <span className="truncate flex-1 font-bold text-[11px]" title={m.name}>
+                          {depth > 0 ? `↳ ${m.name.split(/[:/]/).pop() || m.name}` : m.name}
+                        </span>
+                      </button>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            onSelectOnlyModule(m.id);
+                            if (onDrillDown) onDrillDown(m.id, 'packages');
+                          }}
+                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-emerald-500/20 rounded text-emerald-400 transition-opacity"
+                          title="Фокусувати цей модуль на графі"
+                        >
+                          <Target className="w-3 h-3" />
+                        </button>
+                        {submodules.length > 0 && (
+                          <span className="text-[9px] text-teal-300 px-1 rounded bg-teal-500/15 border border-teal-500/30">
+                            {submodules.length} sub
+                          </span>
+                        )}
+                        <span className="text-[9px] text-slate-400 px-1 rounded bg-black/40">
+                          {modPackages.length}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Submodules & Packages in Module */}
+                    {isModExpanded && (
+                      <div className="pl-3 space-y-0.5 border-l border-emerald-500/10 ml-3.5">
+                        {/* Nested Submodules */}
+                        {submodules.map((sub) => renderModule(sub, depth + 1))}
+
+                        {/* Packages */}
+                        {modPackages.map((pkg) => {
+                          const isPkgExpanded = expandedPkgs[pkg.id] ?? false;
+                          const isPkgSelected = selectedPackages.includes(pkg.id);
+                          const shortPkgName = pkg.name.split('.').slice(-2).join('.');
+
+                          return (
+                            <div key={pkg.id} className="space-y-0.5">
+                              <div
+                                className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-mono transition-colors group ${
+                                  isPkgSelected
+                                    ? 'bg-purple-500/20 text-purple-300 border border-purple-500/40'
+                                    : selectedNodeId === pkg.id
+                                    ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40'
+                                    : 'text-slate-300 hover:bg-white/5'
+                                }`}
+                              >
+                                <button onClick={() => togglePkg(pkg.id)} className="flex items-center gap-1.5 flex-1 min-w-0 text-left">
+                                  {isPkgExpanded ? (
+                                    <ChevronDown className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                                  ) : (
+                                    <ChevronRight className="w-3 h-3 text-slate-400 flex-shrink-0" />
+                                  )}
+                                  {isPkgExpanded ? (
+                                    <FolderOpen className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                                  ) : (
+                                    <Folder className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                                  )}
+                                  <span className="truncate flex-1 text-[11px]" title={pkg.name}>
+                                    {shortPkgName}
+                                  </span>
+                                </button>
+
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={() => {
+                                      onSelectOnlyPackage(pkg.id);
+                                      if (onDrillDown) onDrillDown(pkg.id, 'classes');
+                                    }}
+                                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-purple-500/20 rounded text-purple-400 transition-opacity"
+                                    title="Ізолювати класи цього пакета на графі"
+                                  >
+                                    <Target className="w-3 h-3" />
+                                  </button>
+                                  <span className="text-[9px] text-slate-400 px-1 rounded bg-black/40">
+                                    {pkg.class_ids.length}
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Classes inside this Package */}
+                              {isPkgExpanded && (
+                                <div className="pl-3 space-y-0.5 border-l border-purple-500/10 ml-3.5">
+                                  {(classesByPkgMap.get(pkg.name) || []).map((cls) => {
+                                    const isSelected = selectedNodeId === cls.id;
+                                    return (
+                                      <button
+                                        key={cls.id}
+                                        onClick={() => onSelectNode(cls.id)}
+                                        className={`w-full flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-mono transition-all text-left truncate ${
+                                          isSelected
+                                            ? 'bg-sky-500/30 text-sky-200 border border-sky-500/60 font-bold shadow-md'
+                                            : 'text-slate-300 hover:bg-white/5 hover:text-white'
+                                        }`}
+                                        title={cls.id}
+                                      >
+                                        <FileCode className={`w-3 h-3 flex-shrink-0 ${isSelected ? 'text-sky-400' : 'text-slate-400'}`} />
+                                        <span className="truncate">{cls.name}</span>
+                                        {cls.annotations.length > 0 && (
+                                          <span className="text-[8px] text-amber-400 ml-auto flex-shrink-0">
+                                            @{cls.annotations[0]}
+                                          </span>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+
+              return rootModules.map((m) => renderModule(m, 0));
+            })()}
           </div>
         )}
       </div>

@@ -148,6 +148,10 @@ pub struct ModuleInfo {
     pub afferent_coupling: usize,
     pub efferent_coupling: usize,
     pub instability: f64,
+    #[serde(default)]
+    pub parent_module_id: Option<String>,
+    #[serde(default)]
+    pub submodule_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

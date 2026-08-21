@@ -120,6 +120,8 @@ export interface ModuleInfo {
   afferent_coupling: number;
   efferent_coupling: number;
   instability: number;
+  parent_module_id?: string;
+  submodule_ids?: string[];
 }
 
 export interface Relationship {

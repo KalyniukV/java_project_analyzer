@@ -816,6 +816,8 @@ impl NativeJavaScanner {
                         afferent_coupling: 0,
                         efferent_coupling: 0,
                         instability: 0.0,
+                        parent_module_id: None,
+                        submodule_ids: Vec::new(),
                     });
                 }
             }
@@ -852,6 +854,8 @@ impl NativeJavaScanner {
                                 afferent_coupling: 0,
                                 efferent_coupling: 0,
                                 instability: 0.0,
+                                parent_module_id: None,
+                                submodule_ids: Vec::new(),
                             });
                         }
                     }
@@ -887,6 +891,8 @@ impl NativeJavaScanner {
                 afferent_coupling: 0,
                 efferent_coupling: 0,
                 instability: 0.0,
+                parent_module_id: None,
+                submodule_ids: Vec::new(),
             });
         }
 
@@ -969,6 +975,51 @@ impl NativeJavaScanner {
             }
 
             m.direct_dependencies = deps.into_iter().collect();
+        }
+
+        // Detect parent-child hierarchical module relationships
+        let module_paths: Vec<(String, String)> = found_modules.iter().map(|m| (m.id.clone(), m.path.clone())).collect();
+        for m in &mut found_modules {
+            let m_path = Path::new(&m.path);
+            let mut best_parent: Option<String> = None;
+            let mut best_parent_len = 0;
+
+            for (other_id, other_path) in &module_paths {
+                if other_id != &m.id {
+                    let other_p = Path::new(other_path);
+                    if m_path.starts_with(other_p) && other_p.as_os_str().len() > best_parent_len {
+                        best_parent = Some(other_id.clone());
+                        best_parent_len = other_p.as_os_str().len();
+                    }
+                }
+            }
+
+            // Also check Gradle colon nesting if no path nesting was found
+            if best_parent.is_none() && m.id.contains(':') {
+                let parts: Vec<&str> = m.id.split(':').collect();
+                if parts.len() > 1 {
+                    let parent_candidate = parts[..parts.len() - 1].join(":");
+                    if module_paths.iter().any(|(id, _)| id == &parent_candidate) {
+                        best_parent = Some(parent_candidate);
+                    }
+                }
+            }
+
+            m.parent_module_id = best_parent;
+        }
+
+        // Fill submodule_ids on parents
+        let child_pairs: Vec<(String, String)> = found_modules
+            .iter()
+            .filter_map(|m| m.parent_module_id.as_ref().map(|p| (p.clone(), m.id.clone())))
+            .collect();
+
+        for m in &mut found_modules {
+            m.submodule_ids = child_pairs
+                .iter()
+                .filter(|(parent, _)| parent == &m.id)
+                .map(|(_, child)| child.clone())
+                .collect();
         }
 
         // Sort modules by path length descending so most specific nested submodules match first during file scan
