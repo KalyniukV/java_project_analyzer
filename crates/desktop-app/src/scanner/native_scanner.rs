@@ -610,13 +610,46 @@ impl NativeJavaScanner {
                         source: src_mod.clone(),
                         target: tgt_mod.clone(),
                         kind: RelationKind::ModuleDependency,
-                        description: Some("module dependency".to_string()),
+                        description: Some("code dependency".to_string()),
                         is_circular: false,
                     });
                     rel_id_counter += 1;
                 }
             }
         }
+
+        // Add declared build-file module dependencies from pom.xml / build.gradle
+        for m in &model.modules {
+            for dep in &m.direct_dependencies {
+                if mod_rels.insert((m.id.clone(), dep.clone())) {
+                    derived_rels.push(Relationship {
+                        id: format!("rel-mod-{}", rel_id_counter),
+                        source: m.id.clone(),
+                        target: dep.clone(),
+                        kind: RelationKind::ModuleDependency,
+                        description: Some("declared in build file".to_string()),
+                        is_circular: false,
+                    });
+                    rel_id_counter += 1;
+                }
+            }
+        }
+
+        // Calculate module coupling metrics (Ca, Ce, I)
+        let mut mod_ca: HashMap<String, usize> = HashMap::new();
+        let mut mod_ce: HashMap<String, usize> = HashMap::new();
+        for (src, tgt) in &mod_rels {
+            *mod_ce.entry(src.clone()).or_default() += 1;
+            *mod_ca.entry(tgt.clone()).or_default() += 1;
+        }
+        for m in &mut model.modules {
+            let ca = *mod_ca.get(&m.id).unwrap_or(&0);
+            let ce = *mod_ce.get(&m.id).unwrap_or(&0);
+            m.afferent_coupling = ca;
+            m.efferent_coupling = ce;
+            m.instability = if ca + ce > 0 { ce as f64 / (ca + ce) as f64 } else { 0.0 };
+        }
+
         relationships.extend(derived_rels);
 
         // 7. Detect mutual circular pairs
@@ -872,6 +905,70 @@ impl NativeJavaScanner {
                     }
                 }
             }
+        }
+
+        // Parse inter-module dependencies from pom.xml, build.gradle, and build.gradle.kts
+        let known_mod_map: HashMap<String, String> = found_modules.iter().map(|m| (m.name.clone(), m.id.clone())).collect();
+        let known_mod_dirs: HashMap<String, String> = found_modules.iter().filter_map(|m| {
+            Path::new(&m.path).file_name().and_then(|n| n.to_str()).map(|dir| (dir.to_string(), m.id.clone()))
+        }).collect();
+
+        let pom_dep_regex = Regex::new(r"(?s)<dependency>.*?<artifactId>([^<]+)</artifactId>.*?</dependency>").unwrap();
+        let gradle_dep_regex = Regex::new(r#"project\s*\(\s*(?:path\s*:\s*)?['":]+([^'"]+)['"]\s*\)"#).unwrap();
+
+        for m in &mut found_modules {
+            let mod_dir = Path::new(&m.path);
+            let pom_file = mod_dir.join("pom.xml");
+            let gradle_file = mod_dir.join("build.gradle");
+            let gradle_kts_file = mod_dir.join("build.gradle.kts");
+
+            let mut deps: HashSet<String> = HashSet::new();
+
+            if pom_file.exists() {
+                if let Ok(content) = fs::read_to_string(&pom_file) {
+                    for cap in pom_dep_regex.captures_iter(&content) {
+                        if let Some(art_match) = cap.get(1) {
+                            let art_id = art_match.as_str().trim();
+                            if let Some(target_id) = known_mod_map.get(art_id).or_else(|| known_mod_dirs.get(art_id)) {
+                                if target_id != &m.id {
+                                    deps.insert(target_id.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let gradle_path = if gradle_file.exists() {
+                Some(gradle_file)
+            } else if gradle_kts_file.exists() {
+                Some(gradle_kts_file)
+            } else {
+                None
+            };
+
+            if let Some(gp) = gradle_path {
+                if let Ok(content) = fs::read_to_string(&gp) {
+                    for cap in gradle_dep_regex.captures_iter(&content) {
+                        if let Some(proj_match) = cap.get(1) {
+                            let raw_name = proj_match.as_str().trim().trim_start_matches(':');
+                            let mod_name = raw_name.replace(':', "/");
+                            let last_part = raw_name.split(':').last().unwrap_or(raw_name);
+                            if let Some(target_id) = known_mod_map.get(raw_name)
+                                .or_else(|| known_mod_map.get(&mod_name))
+                                .or_else(|| known_mod_dirs.get(last_part))
+                                .or_else(|| known_mod_map.get(last_part))
+                            {
+                                if target_id != &m.id {
+                                    deps.insert(target_id.clone());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            m.direct_dependencies = deps.into_iter().collect();
         }
 
         // Sort modules by path length descending so most specific nested submodules match first during file scan

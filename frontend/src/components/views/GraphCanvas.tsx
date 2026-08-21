@@ -663,7 +663,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
 
     cy.batch(() => {
       cy.elements().removeClass(
-        'selected inbound-direct inbound-indirect outbound-direct outbound-indirect subgraph-indirect neighbor-in-direct neighbor-in-indirect neighbor-out-direct neighbor-out-indirect dimmed'
+        'selected inbound-direct inbound-indirect outbound-direct outbound-indirect neighbor-in-direct neighbor-in-indirect neighbor-out-direct neighbor-out-indirect dimmed'
       );
       cy.elements().style('display', 'element');
 
@@ -672,63 +672,79 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
         if (selectedNode.length > 0) {
           selectedNode.addClass('selected');
 
-          // 1. Traverse Inbound (Callers) Step-by-Step
+          // 1. Step-by-step Inbound BFS (Callers)
           const inNodesByDepth: cytoscape.NodeCollection[] = [];
-          let allInNodes = cy.collection();
-          let currInNodes = selectedNode;
+          const inEdgesByDepth: cytoscape.EdgeCollection[] = [];
+
+          let accumulatedInNodes = selectedNode;
+          let currInFrontier = selectedNode;
 
           for (let d = 0; d < depth; d++) {
-            const stepNodes = currInNodes.incomers('node').difference(allInNodes).difference(selectedNode);
-            allInNodes = allInNodes.union(stepNodes);
+            const stepEdges = currInFrontier.incomers('edge');
+            const stepNodes = currInFrontier.incomers('node').difference(accumulatedInNodes);
+
+            if (stepNodes.length === 0) break;
+
+            const validStepEdges = stepEdges.filter((e: any) =>
+              stepNodes.contains(e.source()) && currInFrontier.contains(e.target())
+            );
+
             inNodesByDepth.push(stepNodes);
-            currInNodes = stepNodes;
-            if (currInNodes.length === 0) break;
+            inEdgesByDepth.push(validStepEdges);
+            accumulatedInNodes = accumulatedInNodes.union(stepNodes);
+            currInFrontier = stepNodes;
           }
 
-          // 2. Traverse Outbound (Callees) Step-by-Step
+          // 2. Step-by-step Outbound BFS (Callees)
           const outNodesByDepth: cytoscape.NodeCollection[] = [];
-          let allOutNodes = cy.collection();
-          let currOutNodes = selectedNode;
+          const outEdgesByDepth: cytoscape.EdgeCollection[] = [];
+
+          let accumulatedOutNodes = selectedNode;
+          let currOutFrontier = selectedNode;
 
           for (let d = 0; d < depth; d++) {
-            const stepNodes = currOutNodes.outgoers('node').difference(allOutNodes).difference(selectedNode);
-            allOutNodes = allOutNodes.union(stepNodes);
+            const stepEdges = currOutFrontier.outgoers('edge');
+            const stepNodes = currOutFrontier.outgoers('node').difference(accumulatedOutNodes);
+
+            if (stepNodes.length === 0) break;
+
+            const validStepEdges = stepEdges.filter((e: any) =>
+              currOutFrontier.contains(e.source()) && stepNodes.contains(e.target())
+            );
+
             outNodesByDepth.push(stepNodes);
-            currOutNodes = stepNodes;
-            if (currOutNodes.length === 0) break;
+            outEdgesByDepth.push(validStepEdges);
+            accumulatedOutNodes = accumulatedOutNodes.union(stepNodes);
+            currOutFrontier = stepNodes;
           }
 
-          // Direct (Hop 1) vs Indirect (Hop 2+) Nodes
+          // Direct (Hop 1)
           const directInNodes = inNodesByDepth[0] || cy.collection();
-          const indirectInNodes = allInNodes.difference(directInNodes);
-
+          const directInEdges = inEdgesByDepth[0] || cy.collection();
           const directOutNodes = outNodesByDepth[0] || cy.collection();
-          const indirectOutNodes = allOutNodes.difference(directOutNodes);
+          const directOutEdges = outEdgesByDepth[0] || cy.collection();
 
-          // All Active Nodes in Subgraph
-          const activeNodes = selectedNode.union(allInNodes).union(allOutNodes);
+          // Indirect (Hop 2..N)
+          let indirectInNodes = cy.collection();
+          let indirectInEdges = cy.collection();
+          for (let i = 1; i < inNodesByDepth.length; i++) {
+            indirectInNodes = indirectInNodes.union(inNodesByDepth[i]);
+            indirectInEdges = indirectInEdges.union(inEdgesByDepth[i]);
+          }
 
-          // Discover ALL edges within the active subgraph
-          const allSubgraphEdges = activeNodes.edgesWith(activeNodes);
+          let indirectOutNodes = cy.collection();
+          let indirectOutEdges = cy.collection();
+          for (let i = 1; i < outNodesByDepth.length; i++) {
+            indirectOutNodes = indirectOutNodes.union(outNodesByDepth[i]);
+            indirectOutEdges = indirectOutEdges.union(outEdgesByDepth[i]);
+          }
 
-          const directInEdges = selectedNode.incomers('edge');
-          const directOutEdges = selectedNode.outgoers('edge');
-
-          // Inbound chain edges (edges pointing towards target or towards direct in nodes)
-          const indirectInEdges = allInNodes.incomers('edge').intersect(allSubgraphEdges).difference(directInEdges);
-
-          // Outbound chain edges (edges pointing from target or from direct out nodes)
-          const indirectOutEdges = allOutNodes.outgoers('edge').intersect(allSubgraphEdges).difference(directOutEdges);
-
-          const otherSubgraphEdges = allSubgraphEdges
-            .difference(directInEdges)
-            .difference(directOutEdges)
-            .difference(indirectInEdges)
-            .difference(indirectOutEdges);
+          const activeNodes = selectedNode.union(directInNodes).union(indirectInNodes).union(directOutNodes).union(indirectOutNodes);
+          const activeEdges = directInEdges.union(indirectInEdges).union(directOutEdges).union(indirectOutEdges);
 
           if (isolateMode) {
-            // In isolate mode, completely hide elements outside the multi-hop neighborhood
-            const nonActiveElements = cy.elements().difference(activeNodes).difference(allSubgraphEdges);
+            // In isolate mode, hide everything strictly outside the active tree
+            const nonActiveElements = cy.elements().difference(activeNodes).difference(activeEdges);
             nonActiveElements.style('display', 'none');
 
             // Apply direct vs indirect styling
@@ -741,8 +757,6 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             indirectOutNodes.addClass('neighbor-out-indirect');
             directOutEdges.addClass('outbound-direct');
             indirectOutEdges.addClass('outbound-indirect');
-
-            otherSubgraphEdges.addClass('subgraph-indirect');
           } else if (onlyActiveEdges) {
             cy.elements().addClass('dimmed');
             selectedNode.removeClass('dimmed');
@@ -756,8 +770,6 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             indirectOutNodes.removeClass('dimmed').addClass('neighbor-out-indirect');
             directOutEdges.removeClass('dimmed').addClass('outbound-direct');
             indirectOutEdges.removeClass('dimmed').addClass('outbound-indirect');
-
-            otherSubgraphEdges.removeClass('dimmed').addClass('subgraph-indirect');
           } else {
             directInNodes.addClass('neighbor-in-direct');
             indirectInNodes.addClass('neighbor-in-indirect');
@@ -768,8 +780,6 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({
             indirectOutNodes.addClass('neighbor-out-indirect');
             directOutEdges.addClass('outbound-direct');
             indirectOutEdges.addClass('outbound-indirect');
-
-            otherSubgraphEdges.addClass('subgraph-indirect');
           }
         }
       }
